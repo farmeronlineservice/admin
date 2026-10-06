@@ -7,6 +7,29 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<style>
+.menu-fab{display:none;position:fixed;top:12px;left:12px;z-index:900;width:42px;height:42px;border-radius:10px;border:0;background:#10b981;color:#042f1a;font-size:20px;font-weight:700;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,.3)}
+.row-zero{background:rgba(239,68,68,.18)!important}
+.row-zero td{color:#fecaca}
+.dd{position:relative;display:inline-block}
+.dd-btn{width:36px;height:32px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--text);cursor:pointer;font-weight:700}
+.dd-menu{display:none;position:absolute;right:0;top:100%;min-width:180px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px;z-index:50;box-shadow:0 12px 30px rgba(0,0,0,.4)}
+.dd.open .dd-menu{display:block}
+.dd-menu button{display:block;width:100%;text-align:left;background:transparent;border:0;color:var(--text);padding:8px 10px;border-radius:6px;cursor:pointer;font-size:12px;font-family:inherit}
+.dd-menu button:hover{background:var(--card)}
+@media(max-width:800px){
+  .menu-fab{display:flex;align-items:center;justify-content:center}
+  .sidebar{position:fixed;left:0;top:0;bottom:0;z-index:800;transform:translateX(-105%);transition:transform .2s ease;width:min(280px,86vw)}
+  .app.sidebar-open .sidebar{transform:translateX(0)}
+  .main{padding:56px 12px 32px;width:100%}
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .topbar h2{font-size:16px;margin-left:40px}
+  table{font-size:12px}
+  th,td{padding:8px 6px}
+}
+</style>
+
 </head>
 <body>
 <div id="loginPage" class="login-page">
@@ -23,6 +46,7 @@
 </div>
 
 <div id="app" class="app hidden">
+  <button type="button" id="btnMenu" class="menu-fab" aria-label="Menu">☰</button>
   <aside class="sidebar">
     <div class="sidebar-brand">🌾 Farmer ID <small>Admin v5.1</small></div>
     <nav>
@@ -53,17 +77,27 @@
 
     <section id="tab-dashboard" class="tab">
       <div class="stats">
-        <div class="stat"><div class="stat-n" id="sRetailers">0</div><div class="stat-l">Retailers</div></div>
-        <div class="stat"><div class="stat-n" id="sActive">0</div><div class="stat-l">Active</div></div>
-        <div class="stat"><div class="stat-n" id="sInactive">0</div><div class="stat-l">Inactive</div></div>
-        <div class="stat"><div class="stat-n" id="sPending">0</div><div class="stat-l">Pending Users</div></div>
+        <div class="stat"><div class="stat-n" id="sToday">₹0</div><div class="stat-l">Today Sale</div></div>
+        <div class="stat"><div class="stat-n" id="sMonth">₹0</div><div class="stat-l">This Month</div></div>
+        <div class="stat"><div class="stat-n" id="sYear">₹0</div><div class="stat-l">This Year</div></div>
+        <div class="stat"><div class="stat-n" id="sExpense">₹0</div><div class="stat-l">Total Expense</div></div>
+        <div class="stat"><div class="stat-n" id="sProfit">₹0</div><div class="stat-l">Net Profit</div></div>
         <div class="stat"><div class="stat-n" id="sTokPend">0</div><div class="stat-l">Token Pending</div></div>
-        <div class="stat"><div class="stat-n" id="sSale">₹0</div><div class="stat-l">Approved Sales</div></div>
       </div>
       <div class="grid-2">
-        <div class="card"><h3>Monthly Income</h3><canvas id="chartIncome" height="180"></canvas></div>
-        <div class="card"><h3>Pending Summary</h3><div id="pendingSummary" class="muted">—</div>
-          <h3 style="margin-top:16px">Usage Report (7 days)</h3><div id="usageReport" class="muted">—</div></div>
+        <div class="card"><h3>Income (compact)</h3><div style="max-height:160px"><canvas id="chartIncome" height="120"></canvas></div></div>
+        <div class="card"><h3>🏆 Top Retailers (generates)</h3><div id="topRetailers" class="muted">—</div>
+          <h3 style="margin-top:12px">Pending</h3><div id="pendingSummary" class="muted">—</div></div>
+      </div>
+      <div class="card">
+        <h3>🧾 Portal Expenses</h3>
+        <div class="toolbar">
+          <input id="expTitle" placeholder="Title / note">
+          <input id="expAmount" type="number" placeholder="Amount ₹" style="max-width:120px">
+          <input id="expDate" type="date" style="max-width:150px">
+          <button class="btn btn-primary btn-sm" id="btnAddExp">Add Expense</button>
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Date</th><th>Title</th><th>Amount</th><th></th></tr></thead><tbody id="expTable"></tbody></table></div>
       </div>
       <div class="card"><h3>Inactive Retailers (WhatsApp reminder)</h3>
         <div class="toolbar"><button class="btn btn-sm btn-primary" id="btnMsgInactive">Send list / open WA for inactive</button></div>
@@ -75,12 +109,14 @@
       <div class="toolbar">
         <input type="search" id="retSearch" placeholder="Search name / mobile…">
         <select id="retStatus"><option value="">All status</option><option value="active">Active</option><option value="blocked">Blocked</option><option value="temp_approved">Temp</option></select>
+        <select id="retTokFilter"><option value="">All tokens</option><option value="zero">0 tokens only</option><option value="has">Has tokens</option></select>
         <select id="retSort"><option value="new">Newest</option><option value="old">Oldest</option><option value="name">Name</option><option value="tokens">Tokens</option><option value="used">Most used</option><option value="seen">Last seen</option></select>
+        <button class="btn btn-sm" id="btnExportRet">Export users</button>
       </div>
       <div class="card table-wrap">
         <table>
           <thead><tr>
-            <th>Name</th><th>Mobile</th><th>Tokens</th><th>Rate</th><th>Status</th><th>Distributor</th><th>Version</th><th>Last Seen</th><th>Used</th><th>Refill</th><th>Actions</th>
+            <th>Name</th><th>Mobile</th><th>Address</th><th>Tokens</th><th>Rate</th><th>Status</th><th>Distributor</th><th>Last Seen</th><th>Used</th><th></th>
           </tr></thead>
           <tbody id="retTable"></tbody>
         </table>
@@ -123,9 +159,11 @@
       <div class="toolbar">
         <input type="search" id="logSearch" placeholder="Search…">
         <select id="logSort"><option value="new">Newest</option><option value="old">Oldest</option></select>
+        <button class="btn btn-sm" id="btnExportLogs">Export logs</button>
+        <button class="btn btn-sm" id="btnExportUsers2">Export users</button>
       </div>
       <div class="card table-wrap">
-        <table><thead><tr><th>Time</th><th>Retailer</th><th>Farmer</th><th>Place</th><th>Tokens Left</th><th>Cost</th></tr></thead>
+        <table><thead><tr><th>Time</th><th>Retailer</th><th>Farmer</th><th>CSC ID</th><th>Place</th><th>Tokens Left</th><th>Cost</th></tr></thead>
         <tbody id="logTable"></tbody></table>
       </div>
     </section>
@@ -188,7 +226,18 @@
           <label>WhatsApp Group Link</label><input id="setWaGroup" placeholder="https://chat.whatsapp.com/...">
           <label>Buy Message</label><textarea id="setBuyMsg" rows="2"></textarea>
           <label>Approve message template</label>
-          <textarea id="setApproveMsg" rows="2" placeholder="Account approve! Group join karein: {group}"></textarea>
+          <textarea id="setApproveMsg" rows="2" placeholder="Namaste {name} ji
+Aapka Farmer ID Generator account ready hai
+Login Mobile: {mobile}
+Password: {password}
+Tokens: {tokens}
+Install Guide Group:
+{group}
+Usage Guide Video:
+{video}
+
+Dhanyavad!"></textarea>
+          <label>Usage Guide Video Link</label><input id="setVideo" placeholder="https://youtube.com/...">
           <label>UPI Link</label><input id="setUpi">
           <button class="btn btn-primary" id="btnSaveSupport">Save Support</button>
         </div>
@@ -210,9 +259,10 @@
 
     <section id="tab-backup" class="tab hidden">
       <div class="card">
-        <h3>Backup</h3>
+        <h3>Backup / Export All</h3>
         <p class="muted">Poora database JSON download</p>
-        <button class="btn btn-primary" id="btnBackup">Download Backup</button>
+        <button class="btn btn-primary" id="btnBackup">Download Backup JSON</button>
+        <button class="btn btn-primary" id="btnExportAll" style="margin-left:8px">Export All (CSV packs)</button>
       </div>
       <div class="card">
         <h3>Restore</h3>
@@ -223,8 +273,119 @@
     </section>
   </main>
 </div>
+
+<div id="modalEdit" class="modal hidden">
+  <div class="modal-box">
+    <h3>Edit Retailer</h3>
+    <input type="hidden" id="edId">
+    <label>Name</label><input id="edName">
+    <label>Mobile</label><input id="edMobile">
+    <label>Password</label><input id="edPass">
+    <label>Address</label><input id="edAddr">
+    <label>Token rate (blank=default)</label><input id="edRate" type="number">
+    <label>Distributor ID</label><input id="edDist" placeholder="d_xxxxxxxxxx">
+    <label>Status</label>
+    <select id="edStatus"><option value="active">active</option><option value="blocked">blocked</option><option value="temp_approved">temp_approved</option></select>
+    <label><input type="checkbox" id="edRefillOff"> Wallet refill disabled</label>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary" id="btnSaveEdit">Save</button>
+      <button class="btn" id="btnCloseEdit">Close</button>
+    </div>
+  </div>
+</div>
+<div id="modalStmt" class="modal hidden">
+  <div class="modal-box" style="max-width:640px">
+    <h3>Retailer Statement</h3>
+    <div id="stmtBody" style="max-height:50vh;overflow:auto;font-size:13px"></div>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn btn-primary" id="btnPrintStmt">Print / Save PDF</button>
+      <button class="btn" id="btnCloseStmt">Close</button>
+    </div>
+  </div>
+</div>
+<style>
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px}
+.modal.hidden{display:none!important}
+.modal-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;width:100%;max-width:420px}
+.modal-box label{margin-top:8px}
+</style>
+
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
+
+<div id="modalEdit" class="modal hidden">
+  <div class="modal-box">
+    <h3>Edit Retailer</h3>
+    <input type="hidden" id="edId">
+    <label>Name</label><input id="edName">
+    <label>Mobile</label><input id="edMobile">
+    <label>Password</label><input id="edPass">
+    <label>Address</label><input id="edAddr">
+    <label>Token rate (blank=default)</label><input id="edRate" type="number">
+    <label>Distributor ID</label><input id="edDist" placeholder="d_xxxxxxxxxx">
+    <label>Status</label>
+    <select id="edStatus"><option value="active">active</option><option value="blocked">blocked</option><option value="temp_approved">temp_approved</option></select>
+    <label><input type="checkbox" id="edRefillOff"> Wallet refill disabled</label>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary" id="btnSaveEdit">Save</button>
+      <button class="btn" id="btnCloseEdit">Close</button>
+    </div>
+  </div>
+</div>
+<div id="modalStmt" class="modal hidden">
+  <div class="modal-box" style="max-width:640px">
+    <h3>Retailer Statement</h3>
+    <div id="stmtBody" style="max-height:50vh;overflow:auto;font-size:13px"></div>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn btn-primary" id="btnPrintStmt">Print / Save PDF</button>
+      <button class="btn" id="btnCloseStmt">Close</button>
+    </div>
+  </div>
+</div>
+<style>
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px}
+.modal.hidden{display:none!important}
+.modal-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;width:100%;max-width:420px}
+.modal-box label{margin-top:8px}
+</style>
+
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth-compat.js"></script>
+
+<div id="modalEdit" class="modal hidden">
+  <div class="modal-box">
+    <h3>Edit Retailer</h3>
+    <input type="hidden" id="edId">
+    <label>Name</label><input id="edName">
+    <label>Mobile</label><input id="edMobile">
+    <label>Password</label><input id="edPass">
+    <label>Address</label><input id="edAddr">
+    <label>Token rate (blank=default)</label><input id="edRate" type="number">
+    <label>Distributor ID</label><input id="edDist" placeholder="d_xxxxxxxxxx">
+    <label>Status</label>
+    <select id="edStatus"><option value="active">active</option><option value="blocked">blocked</option><option value="temp_approved">temp_approved</option></select>
+    <label><input type="checkbox" id="edRefillOff"> Wallet refill disabled</label>
+    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary" id="btnSaveEdit">Save</button>
+      <button class="btn" id="btnCloseEdit">Close</button>
+    </div>
+  </div>
+</div>
+<div id="modalStmt" class="modal hidden">
+  <div class="modal-box" style="max-width:640px">
+    <h3>Retailer Statement</h3>
+    <div id="stmtBody" style="max-height:50vh;overflow:auto;font-size:13px"></div>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn btn-primary" id="btnPrintStmt">Print / Save PDF</button>
+      <button class="btn" id="btnCloseStmt">Close</button>
+    </div>
+  </div>
+</div>
+<style>
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px}
+.modal.hidden{display:none!important}
+.modal-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;width:100%;max-width:420px}
+.modal-box label{margin-top:8px}
+</style>
+
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-database-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script src="app.js"></script>

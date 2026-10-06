@@ -2,11 +2,15 @@
 (function () {
   "use strict";
   let auth, db;
-  let allUsers = {}, allTokenReqs = {}, allDists = {}, allLogs = {}, allPass = {}, settings = {};
+  let allUsers = {}, allTokenReqs = {}, allDists = {}, allLogs = {}, allPass = {}, allExpenses = {}, settings = {};
   let incomeChart = null;
 
   const $ = (id) => document.getElementById(id);
+  const setText = (id, val) => { const el = $(id); if (el) el.textContent = val; };
   const show = (el, on) => { if (el) el.classList.toggle("hidden", !on); };
+  async function safeGet(path) {
+    try { return await fbGet(path); } catch (e) { console.warn("safeGet", path, e); return null; }
+  }
   const esc = (s) => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
   const fmtDate = (t) => (t ? new Date(t).toLocaleString("en-IN") : "—");
   const daysAgo = (t) => {
@@ -58,7 +62,7 @@
       btn.classList.add("active");
       document.querySelectorAll(".tab").forEach((t) => t.classList.add("hidden"));
       show($("tab-" + btn.dataset.tab), true);
-      $("pageTitle").textContent = btn.textContent.replace(/^[^\s]+\s/, "");
+      setText("pageTitle", (btn.textContent || "").replace(/^\S+\s/, ""));
       refreshTab(btn.dataset.tab);
     };
   });
@@ -78,18 +82,21 @@
 
   async function loadAll() {
     try {
-      const [u, t, d, l, p, s] = await Promise.all([
-        fbGet("users"), fbGet("token_requests"), fbGet("distributors"),
-        fbGet("usage_logs"), fbGet("password_requests"), fbGet("settings")
+      const [u, tq, d, l, p, s, e, inc] = await Promise.all([
+        safeGet("users"), safeGet("token_requests"), safeGet("distributors"),
+        safeGet("usage_logs"), safeGet("password_requests"), safeGet("settings"),
+        safeGet("portal_expenses"), safeGet("admin_income")
       ]);
-      allUsers = u || {}; allTokenReqs = t || {}; allDists = d || {};
+      allUsers = u || {}; allTokenReqs = tq || {}; allDists = d || {};
       allLogs = l || {}; allPass = p || {}; settings = s || {};
-      $("dbStatus").textContent = "DB Connected";
+      allExpenses = e || {};
+      window._adminIncome = inc || {};
+      setText("dbStatus", "DB Connected");
       $("dbStatus").className = "badge ok";
       const active = document.querySelector(".nav.active");
       refreshTab(active ? active.dataset.tab : "dashboard");
     } catch (e) {
-      $("dbStatus").textContent = "Error: " + (e.message || e);
+      setText("dbStatus", "Error: " + (e.message || e));
       $("dbStatus").className = "badge err";
     }
   }
@@ -98,65 +105,141 @@
     return Math.max(1, parseInt(settings.inactiveDays, 10) || 7);
   }
 
+  function startOfDay(ts) {
+    const d = new Date(ts);
+    d.setHours(0,0,0,0);
+    return d.getTime();
+  }
+  function incomeEntries() {
+    const list = [];
+    // From approved token requests
+    Object.values(allTokenReqs || {}).forEach((r) => {
+      if (!r || r.status !== "approved") return;
+      const amt = Number(r.totalAmount) || 0;
+      const ts = r.finalApprovedAt || r.approvedAt || r.createdAt || 0;
+      if (amt) list.push({ amount: amt, ts, type: "sale" });
+    });
+    // Manual admin credits with rate
+    Object.values(window._adminIncome || {}).forEach((x) => {
+      if (!x) return;
+      list.push({ amount: Number(x.amount) || 0, ts: x.timestamp || 0, type: x.type || "manual" });
+    });
+    return list;
+  }
+  function sumInRange(list, from, to) {
+    return list.filter((x) => x.ts >= from && x.ts < to).reduce((s, x) => s + (x.amount || 0), 0);
+  }
+  function totalExpense() {
+    return Object.values(allExpenses || {}).reduce((s, x) => s + (Number(x.amount) || 0), 0);
+  }
+
   function renderDashboard() {
     const users = Object.values(allUsers || {}).filter(Boolean);
     const reqs = Object.values(allTokenReqs || {}).filter(Boolean);
     const idays = inactiveDays();
     const inactive = users.filter((u) => u.status === "active" && daysAgo(u.lastSeenAt || u.lastUsed) >= idays);
-    $("sRetailers").textContent = users.filter((u) => u.status !== "pending").length;
-    $("sActive").textContent = users.filter((u) => u.status === "active").length;
-    $("sInactive").textContent = inactive.length;
-    $("sPending").textContent = users.filter((u) => u.status === "pending").length;
-    $("sTokPend").textContent = reqs.filter((r) => (r.status || "pending") === "pending").length;
-    let sale = 0;
-    reqs.forEach((r) => { if (r.status === "approved") sale += Number(r.totalAmount) || 0; });
-    $("sSale").textContent = "₹" + sale;
 
-    // Pending summary
+    const now = Date.now();
+    const day0 = startOfDay(now);
+    const d = new Date();
+    const month0 = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+    const year0 = new Date(d.getFullYear(), 0, 1).getTime();
+    const inc = incomeEntries();
+    const today = sumInRange(inc, day0, day0 + 86400000);
+    const month = sumInRange(inc, month0, now + 1);
+    const year = sumInRange(inc, year0, now + 1);
+    // refunds are negative in admin_income type refund
+    const exp = totalExpense();
+    const gross = inc.reduce((s, x) => s + (x.amount || 0), 0);
+    const profit = gross - exp;
+
+    if ($("sToday")) $("sToday").textContent = "₹" + today;
+    if ($("sMonth")) $("sMonth").textContent = "₹" + month;
+    if ($("sYear")) $("sYear").textContent = "₹" + year;
+    if ($("sExpense")) $("sExpense").textContent = "₹" + exp;
+    if ($("sProfit")) $("sProfit").textContent = "₹" + profit;
+    if ($("sTokPend")) $("sTokPend").textContent = reqs.filter((r) => (r.status || "pending") === "pending").length;
+
     const tp = reqs.filter((r) => (r.status || "pending") === "pending").length;
     const tt = reqs.filter((r) => r.status === "temp_approved").length;
     const up = users.filter((u) => u.status === "pending").length;
-    $("pendingSummary").innerHTML =
-      `<p>Token pending: <b>${tp}</b></p><p>Temp approved: <b>${tt}</b></p><p>User pending: <b>${up}</b></p>`;
+    if ($("pendingSummary")) {
+      $("pendingSummary").innerHTML =
+        `<p>Token pending: <b>${tp}</b> · Temp: <b>${tt}</b> · Users: <b>${up}</b></p>`;
+    }
 
-    // Usage 7d
-    const logs = Object.values(allLogs || {}).filter(Boolean);
-    const week = Date.now() - 7 * 86400000;
-    const recent = logs.filter((x) => (x.timestamp || 0) >= week);
-    $("usageReport").innerHTML =
-      `<p>Last 7 days generates: <b>${recent.length}</b></p><p>All-time logs: <b>${logs.length}</b></p>`;
+    // Top retailers by generates
+    const top = users.slice().sort((a, b) => (b.totalUsed || 0) - (a.totalUsed || 0)).slice(0, 8);
+    if ($("topRetailers")) {
+      $("topRetailers").innerHTML = top.length
+        ? "<ol style='margin-left:18px'>" + top.map((u) =>
+            `<li><b>${esc(u.name)}</b> (${esc(u.mobile)}) — <b>${u.totalUsed || 0}</b> gen</li>`
+          ).join("") + "</ol>"
+        : "No data";
+    }
 
-    // Monthly income chart
+    // Compact chart - last 6 months line
     const months = {};
-    reqs.forEach((r) => {
-      if (r.status !== "approved" || !r.approvedAt && !r.finalApprovedAt && !r.createdAt) return;
-      const ts = r.finalApprovedAt || r.approvedAt || r.createdAt;
-      const d = new Date(ts);
-      const key = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
-      months[key] = (months[key] || 0) + (Number(r.totalAmount) || 0);
+    inc.forEach((r) => {
+      if (!r.ts) return;
+      const dt = new Date(r.ts);
+      const key = dt.getFullYear() + "-" + String(dt.getMonth() + 1).padStart(2, "0");
+      months[key] = (months[key] || 0) + (r.amount || 0);
     });
-    const labels = Object.keys(months).sort().slice(-12);
+    const labels = Object.keys(months).sort().slice(-6);
     const data = labels.map((k) => months[k]);
     const ctx = $("chartIncome");
     if (ctx && typeof Chart !== "undefined") {
       if (incomeChart) incomeChart.destroy();
       incomeChart = new Chart(ctx, {
-        type: "bar",
+        type: "line",
         data: {
           labels,
-          datasets: [{ label: "₹ Approved", data, backgroundColor: "#10b981" }]
+          datasets: [{
+            label: "₹",
+            data,
+            borderColor: "#34d399",
+            backgroundColor: "rgba(52,211,153,.15)",
+            fill: true,
+            tension: 0.3,
+            pointRadius: 3
+          }]
         },
         options: {
+          responsive: true,
+          maintainAspectRatio: false,
           plugins: { legend: { display: false } },
           scales: {
-            x: { ticks: { color: "#94a3b8" }, grid: { color: "#334155" } },
-            y: { ticks: { color: "#94a3b8" }, grid: { color: "#334155" } }
+            x: { ticks: { color: "#94a3b8", maxRotation: 0, font: { size: 10 } }, grid: { display: false } },
+            y: { ticks: { color: "#94a3b8", font: { size: 10 } }, grid: { color: "#334155" } }
           }
         }
       });
     }
 
-    // Inactive table
+    // Expenses table
+    const et = $("expTable");
+    if (et) {
+      et.innerHTML = "";
+      Object.entries(allExpenses || {})
+        .sort((a, b) => (b[1].date || "").localeCompare(a[1].date || ""))
+        .forEach(([id, x]) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${esc(x.date || "")}</td><td>${esc(x.title || "")}</td>
+            <td>₹${x.amount || 0}</td>
+            <td><button class="btn btn-sm btn-danger" data-eid="${esc(id)}">Del</button></td>`;
+          et.appendChild(tr);
+        });
+      et.onclick = async (e) => {
+        const b = e.target.closest("button[data-eid]");
+        if (!b) return;
+        if (!confirm("Delete expense?")) return;
+        await fbSet("portal_expenses/" + b.dataset.eid, null);
+        await loadAll();
+      };
+    }
+
+    // Inactive table (existing)
     const tb = $("inactiveTable");
     if (!tb) return;
     tb.innerHTML = "";
@@ -194,10 +277,13 @@
   function renderRetailers() {
     const q = (($("retSearch") && $("retSearch").value) || "").toLowerCase();
     const st = ($("retStatus") && $("retStatus").value) || "";
+    const tokF = ($("retTokFilter") && $("retTokFilter").value) || "";
     const sort = ($("retSort") && $("retSort").value) || "new";
     let list = Object.entries(allUsers || {}).filter(([, u]) => u && u.status !== "pending");
     if (st) list = list.filter(([, u]) => u.status === st);
-    if (q) list = list.filter(([, u]) => (u.name || "").toLowerCase().includes(q) || String(u.mobile || "").includes(q));
+    if (tokF === "zero") list = list.filter(([, u]) => !(u.tokens > 0));
+    if (tokF === "has") list = list.filter(([, u]) => (u.tokens || 0) > 0);
+    if (q) list = list.filter(([, u]) => (u.name || "").toLowerCase().includes(q) || String(u.mobile || "").includes(q) || (u.address || "").toLowerCase().includes(q));
     list.sort((a, b) => {
       const A = a[1], B = b[1];
       if (sort === "name") return (A.name || "").localeCompare(B.name || "");
@@ -207,34 +293,44 @@
       if (sort === "old") return (A.createdAt || 0) - (B.createdAt || 0);
       return (B.createdAt || 0) - (A.createdAt || 0);
     });
+    list = list.slice(0, 50);
     const tbody = $("retTable");
+    if (!tbody) return;
     tbody.innerHTML = "";
     if (!list.length) {
-      tbody.innerHTML = '<tr><td colspan="11" class="muted">No data</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" class="muted">No data</td></tr>';
       return;
     }
     list.forEach(([uid, u]) => {
       const rate = u.tokenCost != null && u.tokenCost !== "" ? u.tokenCost : "def";
       const pill = u.status === "active" ? "pill-ok" : u.status === "blocked" ? "pill-bad" : "pill-pend";
       const tr = document.createElement("tr");
+      if (!(u.tokens > 0)) tr.className = "row-zero";
       tr.innerHTML = `
         <td><b>${esc(u.name)}</b></td>
         <td>${esc(u.mobile)}</td>
+        <td class="muted">${esc((u.address||"").slice(0,28))}</td>
         <td><b>${u.tokens || 0}</b></td>
         <td>${rate}</td>
         <td><span class="pill ${pill}">${esc(u.status)}</span></td>
         <td>${esc(distName(u.distributorId))}</td>
-        <td>${esc(u.lastVersion || "—")}</td>
         <td class="muted">${fmtDate(u.lastSeenAt || u.lastUsed)}</td>
         <td>${u.totalUsed || 0}</td>
-        <td>${u.walletRefillDisabled ? "OFF" : "ON"}</td>
         <td>
-          <button class="btn btn-sm" data-a="tok" data-id="${esc(uid)}">+Tok</button>
-          <button class="btn btn-sm" data-a="rate" data-id="${esc(uid)}">Rate</button>
-          <button class="btn btn-sm" data-a="map" data-id="${esc(uid)}">Dist</button>
-          <button class="btn btn-sm" data-a="refill" data-id="${esc(uid)}">${u.walletRefillDisabled ? "Refill ON" : "Refill OFF"}</button>
-          <button class="btn btn-sm" data-a="hist" data-id="${esc(uid)}">History</button>
-          <button class="btn btn-sm btn-danger" data-a="block" data-id="${esc(uid)}">${u.status === "blocked" ? "Unblock" : "Block"}</button>
+          <div class="dd">
+            <button type="button" class="dd-btn" data-dd="1">⋮</button>
+            <div class="dd-menu">
+              <button type="button" data-a="edit" data-id="${esc(uid)}">Edit</button>
+              <button type="button" data-a="tok" data-id="${esc(uid)}">Credit tokens</button>
+              <button type="button" data-a="deb" data-id="${esc(uid)}">Debit tokens</button>
+              <button type="button" data-a="pass" data-id="${esc(uid)}">Show password</button>
+              <button type="button" data-a="wa" data-id="${esc(uid)}">WA password</button>
+              <button type="button" data-a="stmt" data-id="${esc(uid)}">Statement</button>
+              <button type="button" data-a="rate" data-id="${esc(uid)}">Rate</button>
+              <button type="button" data-a="refill" data-id="${esc(uid)}">${u.walletRefillDisabled ? "Refill ON" : "Refill OFF"}</button>
+              <button type="button" data-a="block" data-id="${esc(uid)}">${u.status === "blocked" ? "Unblock" : "Block"}</button>
+            </div>
+          </div>
         </td>`;
       tbody.appendChild(tr);
     });
@@ -245,31 +341,71 @@
       const u = allUsers[id];
       if (!u) return;
       const a = b.dataset.a;
-      if (a === "tok") {
-        const n = prompt("Tokens add:", "10");
+      if (a === "edit") {
+        $("edId").value = id;
+        $("edName").value = u.name || "";
+        $("edMobile").value = u.mobile || "";
+        $("edPass").value = u.password || "";
+        $("edAddr").value = u.address || "";
+        $("edRate").value = u.tokenCost != null ? u.tokenCost : "";
+        $("edDist").value = u.distributorId || "";
+        $("edStatus").value = u.status || "active";
+        $("edRefillOff").checked = !!u.walletRefillDisabled;
+        $("modalEdit").classList.remove("hidden");
+        return;
+      } else if (a === "tok") {
+        const n = prompt("Tokens CREDIT:", "10");
         if (n == null) return;
         const qty = parseInt(n, 10);
-        if (!qty) return;
+        if (!qty || qty < 1) return;
+        const rate = prompt("Rate ₹ per token (income me add hoga):", "10");
+        if (rate == null) return;
+        const r = parseFloat(rate) || 0;
         const tokens = (u.tokens || 0) + qty;
         const h = Array.isArray(u.tokenHistory) ? u.tokenHistory.slice() : [];
-        h.push({ type: "credit", amount: qty, reason: "Admin", timestamp: Date.now(), balanceAfter: tokens });
+        h.push({ type: "credit", amount: qty, reason: "Admin credit @₹" + r, rate: r, timestamp: Date.now(), balanceAfter: tokens });
         await fbUpdate("users/" + id, { tokens, tokenHistory: h });
-      } else if (a === "rate") {
-        const n = prompt("Token cost per ID (blank = default global):", u.tokenCost != null ? u.tokenCost : "");
+        if (r > 0) {
+          await fbSet("admin_income/inc_" + Date.now(), {
+            amount: qty * r, type: "manual_credit", userId: id, qty, rate: r, timestamp: Date.now()
+          });
+        }
+      } else if (a === "deb") {
+        const n = prompt("Tokens DEBIT:", "1");
         if (n == null) return;
-        const val = n.trim() === "" ? null : parseInt(n, 10);
+        const qty = parseInt(n, 10);
+        if (!qty || qty < 1) return;
+        if ((u.tokens || 0) < qty) return alert("Retailer ke paas itne tokens nahi");
+        const refund = prompt("Refund ₹ (income se debit, 0 = nahi):", "0");
+        if (refund == null) return;
+        const rf = parseFloat(refund) || 0;
+        const tokens = (u.tokens || 0) - qty;
+        const h = Array.isArray(u.tokenHistory) ? u.tokenHistory.slice() : [];
+        h.push({ type: "debit", amount: qty, reason: "Admin debit refund ₹" + rf, timestamp: Date.now(), balanceAfter: tokens });
+        await fbUpdate("users/" + id, { tokens, tokenHistory: h });
+        if (rf > 0) {
+          await fbSet("admin_income/inc_" + Date.now(), {
+            amount: -rf, type: "refund", userId: id, qty, timestamp: Date.now()
+          });
+        }
+      } else if (a === "pass") {
+        alert("Password: " + (u.password || "(not set)"));
+        return;
+      } else if (a === "wa") {
+        const mob = String(u.mobile || "").replace(/\D/g, "").slice(-10);
+        const msg = "Namaste " + (u.name || "") + " ji\nAapka Farmer ID login:\nMobile: " + (u.mobile || "") + "\nPassword: " + (u.password || "") + "\nGroup: " + (settings.waGroupLink || "");
+        if (mob) window.open("https://wa.me/91" + mob + "?text=" + encodeURIComponent(msg), "_blank");
+        return;
+      } else if (a === "stmt") {
+        showStatement(id, u);
+        return;
+      } else if (a === "rate") {
+        const n = prompt("Token cost per ID (blank = default):", u.tokenCost != null ? u.tokenCost : "");
+        if (n == null) return;
+        const val = String(n).trim() === "" ? null : parseInt(n, 10);
         await fbUpdate("users/" + id, { tokenCost: val });
-      } else if (a === "map") {
-        const opts = Object.entries(allDists || {}).map(([did, d]) => did + " = " + (d.name || d.mobile)).join("\n");
-        const did = prompt("Distributor id (d_xxxxxxxxxx):\n" + opts, u.distributorId || "");
-        if (did == null) return;
-        await fbUpdate("users/" + id, { distributorId: did.trim() || null });
       } else if (a === "refill") {
         await fbUpdate("users/" + id, { walletRefillDisabled: !u.walletRefillDisabled });
-      } else if (a === "hist") {
-        const h = Array.isArray(u.tokenHistory) ? u.tokenHistory : [];
-        alert(h.slice(-20).map((x) => `${x.type} ${x.amount} — ${x.reason || ""} @ ${fmtDate(x.timestamp)}`).join("\n") || "No history");
-        return;
       } else if (a === "block") {
         await fbUpdate("users/" + id, { status: u.status === "blocked" ? "active" : "blocked" });
       }
@@ -277,7 +413,7 @@
     };
   }
 
-  ["retSearch", "retStatus", "retSort"].forEach((id) => {
+  ["retSearch", "retStatus", "retTokFilter", "retSort"].forEach((id) => {
     if ($(id)) $(id).oninput = $(id).onchange = () => renderRetailers();
   });
 
@@ -306,16 +442,32 @@
       if (!b) return;
       const id = b.dataset.id;
       if (b.dataset.a === "ok") {
-        const free = parseInt(prompt("Free tokens?", "0") || "0", 10) || 0;
+        const free = parseInt(prompt("Free tokens?", "2") || "2", 10) || 0;
+        const u = allUsers[id];
         await fbUpdate("users/" + id, {
           status: "active", tokens: free, freeTokens: free,
           approvedAt: Date.now(), awaitingFinalApprove: false, finalApprovedAt: Date.now()
         });
-        const u = allUsers[id];
-        const group = settings.waGroupLink || "";
-        const tmpl = settings.approveMessage ||
-          "Namaste {name}! Aapka Farmer ID account APPROVE ho gaya. Group join karein: {group}";
-        const msg = tmpl.replace("{name}", u.name || "").replace("{group}", group);
+        const group = settings.waGroupLink || "https://chat.whatsapp.com/JQPabDWptab6SKmIUscfj5";
+        const video = settings.videoGuideLink || "";
+        const tmpl = settings.approveMessage || `Namaste {name} ji
+Aapka Farmer ID Generator account ready hai
+Login Mobile: {mobile}
+Password: {password}
+Tokens: {tokens}
+Install Guide Group:
+{group}
+Usage Guide Video:
+{video}
+
+Dhanyavad!`;
+        const msg = tmpl
+          .replace(/\{name\}/g, u.name || "")
+          .replace(/\{mobile\}/g, u.mobile || "")
+          .replace(/\{password\}/g, u.password || "")
+          .replace(/\{tokens\}/g, String(free))
+          .replace(/\{group\}/g, group)
+          .replace(/\{video\}/g, video);
         const mob = String(u.mobile || "").replace(/\D/g, "").slice(-10);
         if (mob) window.open("https://wa.me/91" + mob + "?text=" + encodeURIComponent(msg), "_blank");
       } else {
@@ -341,7 +493,7 @@
     list.sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
     const tbody = $("tokTable");
     tbody.innerHTML = "";
-    list.slice(0, 100).forEach(([rid, r]) => {
+    list.slice(0, 50).forEach(([rid, r]) => {
       if (!r) return;
       const st = r.status || "pending";
       const pill = st === "approved" ? "pill-ok" : st === "temp_approved" ? "pill-temp" : st === "rejected" ? "pill-bad" : "pill-pend";
@@ -457,16 +609,17 @@
     list.sort((a, b) => sort === "old" ? (a.timestamp || 0) - (b.timestamp || 0) : (b.timestamp || 0) - (a.timestamp || 0));
     const tbody = $("logTable");
     tbody.innerHTML = "";
-    list.slice(0, 150).forEach((x) => {
+    list.slice(0, 50).forEach((x) => {
       const place = [x.taluka, x.district, x.state].filter(Boolean).join(", ");
       const tr = document.createElement("tr");
       tr.innerHTML = `<td class="muted">${fmtDate(x.timestamp)}</td>
         <td>${esc(x.userName)} <span class="muted">${esc(x.userMobile)}</span></td>
         <td>${esc(x.name)} <code>${esc(x.farmerId||"")}</code></td>
+        <td><code>${esc(x.cscUserId||"—")}</code></td>
         <td class="muted">${esc(place)}</td><td>${x.tokensLeft??"—"}</td><td>${x.costCharged??"—"}</td>`;
       tbody.appendChild(tr);
     });
-    if (!list.length) tbody.innerHTML = '<tr><td colspan="6" class="muted">No logs</td></tr>';
+    if (!list.length) tbody.innerHTML = '<tr><td colspan="7" class="muted">No logs</td></tr>';
   }
   if ($("logSearch")) $("logSearch").oninput = () => renderLogs();
   if ($("logSort")) $("logSort").onchange = () => renderLogs();
@@ -474,7 +627,7 @@
   function renderPass() {
     const tbody = $("passTable");
     tbody.innerHTML = "";
-    Object.entries(allPass || {}).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0)).forEach(([id, r]) => {
+    Object.entries(allPass || {}).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0)).slice(0, 50).forEach(([id, r]) => {
       if (!r) return;
       const tr = document.createElement("tr");
       tr.innerHTML = `<td>${fmtDate(r.createdAt)}</td><td>${esc(r.mobile)}</td><td>${esc(r.name||"")}</td>
@@ -547,7 +700,18 @@
     $("setWa").value = s.whatsappNumber || "";
     $("setWaGroup").value = s.waGroupLink || "";
     $("setBuyMsg").value = s.buyMessage || "";
-    $("setApproveMsg").value = s.approveMessage || "";
+    $("setApproveMsg").value = s.approveMessage || `Namaste {name} ji
+Aapka Farmer ID Generator account ready hai
+Login Mobile: {mobile}
+Password: {password}
+Tokens: {tokens}
+Install Guide Group:
+{group}
+Usage Guide Video:
+{video}
+
+Dhanyavad!`;
+    if ($("setVideo")) $("setVideo").value = s.videoGuideLink || "";
     $("setUpi").value = s.upiLink || "";
     $("rate1").value = s.rate1to5 != null ? s.rate1to5 : 20;
     $("rate2").value = s.rate6to10 != null ? s.rate6to10 : 15;
@@ -581,6 +745,7 @@
       waGroupLink: $("setWaGroup").value.trim(),
       buyMessage: $("setBuyMsg").value.trim(),
       approveMessage: $("setApproveMsg").value.trim(),
+      videoGuideLink: ($("setVideo") && $("setVideo").value.trim()) || "",
       upiLink: $("setUpi").value.trim()
     });
     alert("Support saved"); await loadAll();
@@ -626,6 +791,96 @@
     await loadAll();
   };
 
+
+
+  function showStatement(id, u) {
+    const h = Array.isArray(u.tokenHistory) ? u.tokenHistory.slice() : [];
+    h.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    let rows = h.map((x) =>
+      `<tr><td>${fmtDate(x.timestamp)}</td><td>${esc(x.type)}</td><td>${x.amount}</td><td>${esc(x.reason||"")}</td><td>${x.balanceAfter??""}</td></tr>`
+    ).join("");
+    if (!rows) rows = '<tr><td colspan="5">No transactions</td></tr>';
+    $("stmtBody").innerHTML = `
+      <p><b>${esc(u.name)}</b> · ${esc(u.mobile)} · Tokens: <b>${u.tokens||0}</b> · Used: ${u.totalUsed||0}</p>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr><th>Date</th><th>Type</th><th>Qty</th><th>Note</th><th>Bal</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+    $("modalStmt").classList.remove("hidden");
+  }
+  if ($("btnCloseStmt")) $("btnCloseStmt").onclick = () => $("modalStmt").classList.add("hidden");
+  if ($("btnPrintStmt")) $("btnPrintStmt").onclick = () => {
+    const w = window.open("", "_blank");
+    w.document.write("<html><head><title>Statement</title></head><body>" + $("stmtBody").innerHTML + "</body></html>");
+    w.document.close();
+    w.print();
+  };
+  if ($("btnCloseEdit")) $("btnCloseEdit").onclick = () => $("modalEdit").classList.add("hidden");
+  if ($("btnSaveEdit")) $("btnSaveEdit").onclick = async () => {
+    const id = $("edId").value;
+    const rate = $("edRate").value.trim();
+    await fbUpdate("users/" + id, {
+      name: $("edName").value.trim(),
+      mobile: $("edMobile").value.trim(),
+      password: $("edPass").value,
+      address: $("edAddr").value.trim(),
+      tokenCost: rate === "" ? null : parseInt(rate, 10),
+      distributorId: $("edDist").value.trim() || null,
+      status: $("edStatus").value,
+      walletRefillDisabled: $("edRefillOff").checked
+    });
+    $("modalEdit").classList.add("hidden");
+    await loadAll();
+  };
+
+  if ($("btnAddExp")) $("btnAddExp").onclick = async () => {
+    const title = $("expTitle").value.trim();
+    const amount = parseFloat($("expAmount").value) || 0;
+    let date = $("expDate").value;
+    if (!date) date = new Date().toISOString().slice(0, 10);
+    if (!title || !amount) return alert("Title + amount");
+    const id = "exp_" + Date.now();
+    await fbSet("portal_expenses/" + id, { title, amount, date, createdAt: Date.now() });
+    $("expTitle").value = "";
+    $("expAmount").value = "";
+    await loadAll();
+  };
+
+  async function exportCsv(name, rows) {
+    const blob = new Blob([rows], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+  }
+  if ($("btnExportAll")) $("btnExportAll").onclick = async () => {
+    // users
+    let u = "id,name,mobile,password,tokens,status,rate,distributor,totalUsed,lastSeen\n";
+    Object.entries(allUsers || {}).forEach(([id, x]) => {
+      if (!x) return;
+      u += [id, x.name, x.mobile, x.password, x.tokens, x.status, x.tokenCost, x.distributorId, x.totalUsed, x.lastSeenAt].map((v) => `"${String(v??"").replace(/"/g,"'")}"`).join(",") + "\n";
+    });
+    await exportCsv("users.csv", u);
+    let l = "time,retailer,mobile,farmer,farmerId,cscId,place,tokensLeft,cost\n";
+    Object.values(allLogs || {}).forEach((x) => {
+      if (!x) return;
+      const place = [x.taluka, x.district, x.state].filter(Boolean).join(" ");
+      l += [fmtDate(x.timestamp), x.userName, x.userMobile, x.name, x.farmerId, x.cscUserId, place, x.tokensLeft, x.costCharged].map((v) => `"${String(v??"").replace(/"/g,"'")}"`).join(",") + "\n";
+    });
+    await exportCsv("logs.csv", l);
+    let r = "date,name,mobile,qty,amount,utr,status\n";
+    Object.values(allTokenReqs || {}).forEach((x) => {
+      if (!x) return;
+      r += [fmtDate(x.createdAt), x.userName, x.userMobile, x.amount, x.totalAmount, x.utr, x.status].map((v) => `"${String(v??"").replace(/"/g,"'")}"`).join(",") + "\n";
+    });
+    await exportCsv("token_requests.csv", r);
+    alert("CSV files downloaded (users, logs, token_requests). JSON backup bhi le sakte ho.");
+  };
+
+  // admin_income live
+  // (loaded in loadAll)
+
+
   function startLive() {
     db.ref("users").on("value", (s) => { allUsers = s.val() || {}; refreshTab(document.querySelector(".nav.active")?.dataset.tab || "dashboard"); });
     db.ref("token_requests").on("value", (s) => { allTokenReqs = s.val() || {}; });
@@ -634,13 +889,55 @@
     db.ref("settings").on("value", (s) => { settings = s.val() || {}; });
   }
 
+
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-dd]");
+    if (btn) {
+      e.stopPropagation();
+      const dd = btn.closest(".dd");
+      document.querySelectorAll(".dd.open").forEach((x) => { if (x !== dd) x.classList.remove("open"); });
+      if (dd) dd.classList.toggle("open");
+      return;
+    }
+    if (!e.target.closest(".dd")) document.querySelectorAll(".dd.open").forEach((x) => x.classList.remove("open"));
+  });
+  if ($("btnMenu")) $("btnMenu").onclick = () => { const app = $("app") || document.getElementById("app"); if (app) app.classList.toggle("sidebar-open"); };
+  function downloadUsersCsv() {
+    let u = "id,name,mobile,password,tokens,status,rate,address,distributor,totalUsed,lastSeen\n";
+    Object.entries(allUsers || {}).forEach(([id, x]) => {
+      if (!x) return;
+      u += [id, x.name, x.mobile, x.password, x.tokens, x.status, x.tokenCost, x.address, x.distributorId, x.totalUsed, x.lastSeenAt].map((v) => '"' + String(v ?? "").replace(/"/g, "'") + '"').join(",") + "\n";
+    });
+    if (typeof exportCsv === "function") exportCsv("users.csv", u);
+    else {
+      const blob = new Blob([u], { type: "text/csv" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "users.csv"; a.click();
+    }
+  }
+  function downloadLogsCsv() {
+    let l = "time,retailer,mobile,farmer,farmerId,cscId,place,tokensLeft,cost\n";
+    Object.values(allLogs || {}).forEach((x) => {
+      if (!x) return;
+      const place = [x.taluka, x.district, x.state].filter(Boolean).join(" ");
+      l += [fmtDate(x.timestamp), x.userName, x.userMobile, x.name, x.farmerId, x.cscUserId, place, x.tokensLeft, x.costCharged].map((v) => '"' + String(v ?? "").replace(/"/g, "'") + '"').join(",") + "\n";
+    });
+    if (typeof exportCsv === "function") exportCsv("logs.csv", l);
+    else {
+      const blob = new Blob([l], { type: "text/csv" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "logs.csv"; a.click();
+    }
+  }
+  if ($("btnExportRet")) $("btnExportRet").onclick = downloadUsersCsv;
+  if ($("btnExportLogs")) $("btnExportLogs").onclick = downloadLogsCsv;
+  if ($("btnExportUsers2")) $("btnExportUsers2").onclick = downloadUsersCsv;
+
   try {
     initFirebase();
     auth.onAuthStateChanged(async (user) => {
       if (user) {
         show($("loginPage"), false);
         show($("app"), true);
-        $("adminEmail").textContent = user.email || user.uid;
+        setText("adminEmail", user.email || user.uid);
         await loadAll();
         startLive();
       } else {

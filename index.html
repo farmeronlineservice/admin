@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Farmer ID Pro — Admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<!-- LOGIN -->
+<div id="loginPage" class="login-page">
+  <div class="login-card">
+    <div class="brand">
+      <span class="brand-icon">🌾</span>
+      <h1>Farmer ID Pro</h1>
+      <p>Secure Admin Panel</p>
+    </div>
+    <div id="loginError" class="alert alert-err hidden"></div>
+    <label>Email</label>
+    <input type="email" id="loginEmail" placeholder="admin@email.com" autocomplete="username">
+    <label>Password</label>
+    <input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password">
+    <button class="btn btn-primary btn-block" id="btnLogin">Login</button>
+    <p class="hint">Firebase Authentication · GitHub / Hosting se open karein</p>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app" class="app hidden">
+  <aside class="sidebar">
+    <div class="sidebar-brand">🌾 Farmer ID <small>Admin</small></div>
+    <nav>
+      <button class="nav active" data-tab="dashboard">📊 Dashboard</button>
+      <button class="nav" data-tab="retailers">👥 Retailers</button>
+      <button class="nav" data-tab="pending">⏳ Pending Users</button>
+      <button class="nav" data-tab="tokens">💳 Token Requests</button>
+      <button class="nav" data-tab="settings">⚙️ Settings</button>
+      <button class="nav" data-tab="payments">💰 Payments</button>
+    </nav>
+    <div class="sidebar-foot">
+      <div id="adminEmail" class="admin-email"></div>
+      <button class="btn btn-ghost btn-block" id="btnLogout">Logout</button>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <h2 id="pageTitle">Dashboard</h2>
+      <div class="topbar-actions">
+        <span id="dbStatus" class="badge">Connecting…</span>
+        <button class="btn btn-sm" id="btnRefresh">↻ Refresh</button>
+      </div>
+    </header>
+
+    <!-- DASHBOARD -->
+    <section id="tab-dashboard" class="tab">
+      <div class="stats">
+        <div class="stat"><div class="stat-n" id="sRetailers">0</div><div class="stat-l">Retailers</div></div>
+        <div class="stat"><div class="stat-n" id="sActive">0</div><div class="stat-l">Active</div></div>
+        <div class="stat"><div class="stat-n" id="sPending">0</div><div class="stat-l">Pending Users</div></div>
+        <div class="stat"><div class="stat-n" id="sTokPend">0</div><div class="stat-l">Token Pending</div></div>
+        <div class="stat"><div class="stat-n" id="sTokTemp">0</div><div class="stat-l">Temp Approved</div></div>
+        <div class="stat"><div class="stat-n" id="sSale">₹0</div><div class="stat-l">Approved Sales</div></div>
+      </div>
+      <div class="card">
+        <h3>Quick help</h3>
+        <p class="muted">Token requests yahan se approve/reject karein. Settings me auto-approve aur Razorpay control karein. Retailers ko ⚡ Auto ON se unki payment auto temp-approve hogi.</p>
+      </div>
+    </section>
+
+    <!-- RETAILERS -->
+    <section id="tab-retailers" class="tab hidden">
+      <div class="toolbar">
+        <input type="search" id="retSearch" placeholder="Search name / mobile…">
+      </div>
+      <div class="card table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Mobile</th><th>Tokens</th><th>Status</th><th>Auto Pay</th><th>Actions</th></tr></thead>
+          <tbody id="retTable"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- PENDING USERS -->
+    <section id="tab-pending" class="tab hidden">
+      <div class="card table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Mobile</th><th>Address</th><th>When</th><th>Actions</th></tr></thead>
+          <tbody id="pendTable"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TOKEN REQUESTS -->
+    <section id="tab-tokens" class="tab hidden">
+      <div class="toolbar">
+        <select id="tokFilter">
+          <option value="">All</option>
+          <option value="pending">Pending</option>
+          <option value="temp_approved">Temp Approved</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+        </select>
+      </div>
+      <div class="card table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Name</th><th>Mobile</th><th>Qty</th><th>Amount</th><th>UTR</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody id="tokTable"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section id="tab-settings" class="tab hidden">
+      <div class="grid-2">
+        <div class="card">
+          <h3>Auto Approve</h3>
+          <label>Payment Auto Temp-Approve (Global)</label>
+          <select id="setAutoPay"><option value="0">OFF</option><option value="1">ON</option></select>
+          <label>New Retailer Auto Active (0 tokens)</label>
+          <select id="setAutoRet"><option value="0">OFF</option><option value="1">ON</option></select>
+          <label>Tokens per Farmer ID (0 = free)</label>
+          <input type="number" id="setTokenCost" min="0" value="1">
+          <label>Free Generate Mode</label>
+          <select id="setFreeGen"><option value="0">OFF</option><option value="1">ON</option></select>
+          <button class="btn btn-primary" id="btnSaveAuto">Save Auto Settings</button>
+        </div>
+        <div class="card">
+          <h3>Support / UPI</h3>
+          <label>WhatsApp Number</label>
+          <input id="setWa" placeholder="6376965187">
+          <label>Buy Message</label>
+          <textarea id="setBuyMsg" rows="2"></textarea>
+          <label>UPI Link</label>
+          <input id="setUpi" placeholder="upi://pay?pa=...">
+          <button class="btn btn-primary" id="btnSaveSupport">Save Support</button>
+        </div>
+        <div class="card">
+          <h3>Token Rates (₹)</h3>
+          <label>1–5 tokens</label><input type="number" id="rate1" value="20">
+          <label>6–10 tokens</label><input type="number" id="rate2" value="15">
+          <label>11+ tokens</label><input type="number" id="rate3" value="10">
+          <button class="btn btn-primary" id="btnSaveRates">Save Rates</button>
+        </div>
+        <div class="card">
+          <h3>More Service Button</h3>
+          <label>Show button</label>
+          <select id="setMoreEn"><option value="0">Hide</option><option value="1">Show</option></select>
+          <label>Label</label><input id="setMoreLabel" value="More Service">
+          <label>URL</label><input id="setMoreUrl" placeholder="https://...">
+          <button class="btn btn-primary" id="btnSaveMore">Save</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- PAYMENTS -->
+    <section id="tab-payments" class="tab hidden">
+      <div class="grid-2">
+        <div class="card">
+          <h3>Razorpay</h3>
+          <p class="muted">ON = wallet me Pay with Razorpay. OFF = sirf manual UTR/UPI.</p>
+          <label>Status</label>
+          <select id="rzpEn"><option value="0">Disabled (Manual only)</option><option value="1">Enabled</option></select>
+          <label>Key ID</label>
+          <input id="rzpKey" placeholder="rzp_live_xxxx">
+          <label>Key Secret (server only — yahan save optional)</label>
+          <input id="rzpSecret" type="password" placeholder="secret">
+          <button class="btn btn-primary" id="btnSaveRzp">Save Razorpay</button>
+        </div>
+        <div class="card">
+          <h3>Manual refill rules</h3>
+          <ul class="muted">
+            <li>Qty 1–50 + valid UTR → auto temp-approve (agar Global ON + retailer ⚡ Auto ON)</li>
+            <li>UTR: 12/16 digit, ya T+22 digits, ya Razorpay pay_xxx</li>
+            <li>Temp approve = tokens turant wallet me</li>
+            <li>Final Approve = sale confirm</li>
+            <li>Reject/Delete after temp = tokens wapas debit</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

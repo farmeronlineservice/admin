@@ -6,44 +6,71 @@
 <title>Distributor Panel — Farmer ID</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<style>
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.tabs button{padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--text);cursor:pointer;font-family:inherit}
+.tabs button.active{background:#064e3b;color:#6ee7b7;border-color:#065f46}
+.panel{display:none}.panel.active{display:block}
+@media(max-width:700px){.main{padding:12px}}
+</style>
 </head>
 <body>
 <div id="loginPage" class="login-page">
   <div class="login-card">
-    <div class="brand"><span class="brand-icon">🏢</span><h1>Distributor Panel</h1><p>Farmer ID Pro</p></div>
+    <div class="brand"><span class="brand-icon">🏢</span><h1>Distributor Panel</h1></div>
     <div id="loginError" class="alert alert-err hidden"></div>
-    <label>Mobile</label>
-    <input id="loginMobile" placeholder="10 digit mobile" maxlength="10">
-    <label>Password</label>
-    <input type="password" id="loginPass">
+    <label>Mobile</label><input id="loginMobile" maxlength="10">
+    <label>Password</label><input type="password" id="loginPass">
     <button class="btn btn-primary btn-block" id="btnLogin">Login</button>
-    <p class="hint"><a href="index.html" style="color:#6ee7b7">Admin Login →</a></p>
+    <p class="hint"><a href="index.html" style="color:#6ee7b7">Admin →</a></p>
   </div>
 </div>
-<div id="app" class="app hidden" style="display:block">
-  <main class="main" style="max-width:900px;margin:0 auto">
-    <header class="topbar">
-      <h2 id="distTitle">Distributor</h2>
-      <div class="topbar-actions">
-        <span class="badge ok" id="tokBadge">Tokens: 0</span>
-        <button class="btn btn-sm" id="btnLogout">Logout</button>
-      </div>
-    </header>
+<div id="app" class="hidden" style="max-width:960px;margin:0 auto;padding:16px">
+  <header class="topbar">
+    <h2 id="distTitle">Distributor</h2>
+    <div class="topbar-actions">
+      <span class="badge ok" id="tokBadge">Tokens: 0</span>
+      <button class="btn btn-sm" id="btnLogout">Logout</button>
+    </div>
+  </header>
+  <div class="tabs">
+    <button class="active" data-p="retailers">My Retailers</button>
+    <button data-p="add">Add Retailer</button>
+    <button data-p="earn">My Earnings / Wallet</button>
+    <button data-p="hist">My History</button>
+  </div>
+  <div id="p-retailers" class="panel active">
     <div class="card">
-      <h3>My Retailers — Add Tokens</h3>
-      <p class="muted">Sirf aapke under mapped retailers. Aapke wallet se tokens transfer honge.</p>
+      <p class="muted">Sirf aapke under wale retailers. Transfer aapke wallet se hota hai.</p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Mobile</th><th>Their Tokens</th><th>Action</th></tr></thead>
+          <thead><tr><th>Name</th><th>Mobile</th><th>Tokens</th><th>Status</th><th>Used</th><th>Actions</th></tr></thead>
           <tbody id="retTable"></tbody>
         </table>
       </div>
     </div>
+  </div>
+  <div id="p-add" class="panel">
     <div class="card">
-      <h3>My Token History</h3>
-      <pre id="hist" class="muted" style="white-space:pre-wrap;font-size:12px"></pre>
+      <h3>Add Retailer (under me)</h3>
+      <label>Name</label><input id="rName">
+      <label>Mobile</label><input id="rMobile" maxlength="10">
+      <label>Password</label><input id="rPass" value="123456">
+      <label>Address</label><input id="rAddr">
+      <label>Start tokens (aapke wallet se)</label><input id="rTok" type="number" value="0">
+      <button class="btn btn-primary" id="btnAddRet" style="margin-top:12px">Create</button>
     </div>
-  </main>
+  </div>
+  <div id="p-earn" class="panel">
+    <div class="card">
+      <h3>Wallet / Commission</h3>
+      <p>Balance: <b id="bal2">0</b> · Total commission: <b id="comm">0</b></p>
+      <p class="muted">Retailer generate par admin rule ke hisaab se commission milta hai.</p>
+    </div>
+  </div>
+  <div id="p-hist" class="panel">
+    <div class="card"><h3>My token history</h3><pre id="hist" class="muted" style="white-space:pre-wrap;font-size:12px"></pre></div>
+  </div>
 </div>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-database-compat.js"></script>
@@ -52,87 +79,127 @@
 (function(){
   let db, distId, dist;
   const $ = id => document.getElementById(id);
-  function init(){
-    if(!firebase.apps.length) firebase.initializeApp(window.FIREBASE_CONFIG);
-    db = firebase.database();
-  }
-  async function get(path){ return (await db.ref(path).once('value')).val(); }
-  async function update(path, data){ await db.ref(path).update(data); }
+  function init(){ if(!firebase.apps.length) firebase.initializeApp(window.FIREBASE_CONFIG); db = firebase.database(); }
+  async function get(p){ return (await db.ref(p).once("value")).val(); }
+  async function update(p,d){ await db.ref(p).update(d); }
+  async function set(p,d){ await db.ref(p).set(d); }
 
-  $("btnLogin").onclick = async () => {
-    const err = $("loginError");
-    err.classList.add("hidden");
-    try {
+  document.querySelectorAll(".tabs button").forEach(b=>{
+    b.onclick=()=>{
+      document.querySelectorAll(".tabs button").forEach(x=>x.classList.remove("active"));
+      b.classList.add("active");
+      document.querySelectorAll(".panel").forEach(x=>x.classList.remove("active"));
+      $("p-"+b.dataset.p).classList.add("active");
+    };
+  });
+
+  $("btnLogin").onclick = async ()=>{
+    const err=$("loginError"); err.classList.add("hidden");
+    try{
       init();
-      const mobile = $("loginMobile").value.replace(/\D/g,"").slice(0,10);
-      const pass = $("loginPass").value;
-      const id = "d_" + mobile;
-      const d = await get("distributors/"+id);
-      if(!d || d.password !== pass) throw new Error("Galat mobile/password");
-      if(d.status === "blocked") throw new Error("Account blocked");
-      distId = id; dist = d;
-      sessionStorage.setItem("distId", id);
-      showApp();
-    } catch(e) {
-      err.textContent = e.message || String(e);
-      err.classList.remove("hidden");
-    }
+      const mobile=$("loginMobile").value.replace(/\D/g,"").slice(0,10);
+      const id="d_"+mobile;
+      const d=await get("distributors/"+id);
+      if(!d||d.password!==$("loginPass").value) throw new Error("Galat mobile/password");
+      if(d.status==="blocked") throw new Error("Blocked");
+      distId=id; dist=d;
+      sessionStorage.setItem("distId",id);
+      await showApp();
+    }catch(e){ err.textContent=e.message||String(e); err.classList.remove("hidden"); }
   };
-  $("btnLogout").onclick = () => { sessionStorage.removeItem("distId"); location.reload(); };
+  $("btnLogout").onclick=()=>{ sessionStorage.removeItem("distId"); location.reload(); };
 
   async function showApp(){
     $("loginPage").classList.add("hidden");
     $("app").classList.remove("hidden");
-    $("app").style.display = "block";
     dist = await get("distributors/"+distId);
-    $("distTitle").textContent = dist.name || "Distributor";
-    $("tokBadge").textContent = "Tokens: " + (dist.tokens||0);
-    const users = (await get("users")) || {};
-    const tbody = $("retTable");
-    tbody.innerHTML = "";
+    $("distTitle").textContent = dist.name||"Distributor";
+    $("tokBadge").textContent = "Tokens: "+(dist.tokens||0);
+    $("bal2").textContent = dist.tokens||0;
+    $("comm").textContent = dist.totalCommission||0;
+    const users = (await get("users"))||{};
+    const tbody=$("retTable"); tbody.innerHTML="";
     Object.entries(users).forEach(([uid,u])=>{
-      if(!u || u.distributorId !== distId) return;
-      const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${u.name||""}</td><td>${u.mobile||""}</td><td><b>${u.tokens||0}</b></td>
-        <td><button class="btn btn-sm btn-primary" data-id="${uid}">Transfer tokens</button></td>`;
+      if(!u||u.distributorId!==distId) return;
+      const tr=document.createElement("tr");
+      tr.innerHTML=`<td>${u.name||""}</td><td>${u.mobile||""}</td><td><b>${u.tokens||0}</b></td>
+        <td>${u.status||""}</td><td>${u.totalUsed||0}</td>
+        <td>
+          <button class="btn btn-sm" data-a="add" data-id="${uid}">+Tok</button>
+          <button class="btn btn-sm" data-a="pass" data-id="${uid}">Pass</button>
+          <button class="btn btn-sm" data-a="wa" data-id="${uid}">WA</button>
+          <button class="btn btn-sm" data-a="hist" data-id="${uid}">History</button>
+          <button class="btn btn-sm btn-danger" data-a="block" data-id="${uid}">${u.status==="blocked"?"Unblock":"Block"}</button>
+        </td>`;
       tbody.appendChild(tr);
     });
-    tbody.onclick = async (e) => {
-      const b = e.target.closest("button");
-      if(!b) return;
-      const uid = b.getAttribute("data-id");
-      const n = parseInt(prompt("Kitne tokens transfer?", "5")||"0",10);
-      if(!n || n<1) return;
-      dist = await get("distributors/"+distId);
-      if((dist.tokens||0) < n) return alert("Aapke paas itne tokens nahi");
-      const u = await get("users/"+uid);
-      if(!u) return;
-      const dt = (dist.tokens||0) - n;
-      const ut = (u.tokens||0) + n;
-      const dh = Array.isArray(dist.tokenHistory)?dist.tokenHistory:[];
-      dh.push({type:"debit",amount:n,reason:"Transfer to "+(u.mobile||uid),timestamp:Date.now(),balanceAfter:dt});
-      const uh = Array.isArray(u.tokenHistory)?u.tokenHistory:[];
-      uh.push({type:"credit",amount:n,reason:"From distributor",timestamp:Date.now(),balanceAfter:ut});
-      await update("distributors/"+distId,{tokens:dt,tokenHistory:dh.slice(-50)});
-      await update("users/"+uid,{tokens:ut,tokenHistory:uh.slice(-50)});
-      alert("Transferred");
-      showApp();
+    tbody.onclick = async (e)=>{
+      const b=e.target.closest("button"); if(!b) return;
+      const uid=b.dataset.id; const u=await get("users/"+uid); if(!u) return;
+      dist=await get("distributors/"+distId);
+      if(b.dataset.a==="add"){
+        const n=parseInt(prompt("Transfer tokens from YOUR wallet:", "5")||"0",10);
+        if(!n||n<1) return;
+        if((dist.tokens||0)<n) return alert("Aapke paas tokens kam hain");
+        const dt=(dist.tokens||0)-n, ut=(u.tokens||0)+n;
+        const dh=Array.isArray(dist.tokenHistory)?dist.tokenHistory:[];
+        dh.push({type:"debit",amount:n,reason:"To "+(u.mobile||uid),timestamp:Date.now(),balanceAfter:dt});
+        const uh=Array.isArray(u.tokenHistory)?u.tokenHistory:[];
+        uh.push({type:"credit",amount:n,reason:"From distributor",timestamp:Date.now(),balanceAfter:ut});
+        await update("distributors/"+distId,{tokens:dt,tokenHistory:dh.slice(-50)});
+        await update("users/"+uid,{tokens:ut,tokenHistory:uh.slice(-50)});
+        alert("OK"); showApp();
+      } else if(b.dataset.a==="pass"){
+        alert("Password: "+(u.password||""));
+        const np=prompt("New password (blank=no change):", u.password||"");
+        if(np) await update("users/"+uid,{password:np});
+      } else if(b.dataset.a==="wa"){
+        const mob=String(u.mobile||"").replace(/\D/g,"").slice(-10);
+        const msg=`Namaste ${u.name||""} ji\nMobile: ${u.mobile}\nPassword: ${u.password||""}`;
+        if(mob) window.open("https://wa.me/91"+mob+"?text="+encodeURIComponent(msg),"_blank");
+      } else if(b.dataset.a==="hist"){
+        const h=Array.isArray(u.tokenHistory)?u.tokenHistory:[];
+        alert(h.slice(-15).map(x=>`${x.type} ${x.amount} ${x.reason||""}`).join("\n")||"Empty");
+      } else if(b.dataset.a==="block"){
+        await update("users/"+uid,{status:u.status==="blocked"?"active":"blocked"});
+        showApp();
+      }
     };
-    const h = Array.isArray(dist.tokenHistory)?dist.tokenHistory:[];
-    $("hist").textContent = h.slice(-30).reverse().map(x=>`${x.type} ${x.amount} — ${x.reason||""}`).join("\n") || "No history";
+    const h=Array.isArray(dist.tokenHistory)?dist.tokenHistory:[];
+    $("hist").textContent=h.slice().reverse().map(x=>`${x.type} ${x.amount} — ${x.reason||""}`).join("\n")||"No history";
   }
 
-  // auto session
-  (async function(){
-    const id = sessionStorage.getItem("distId");
-    if(id){
-      try {
-        init();
-        distId = id;
-        const d = await get("distributors/"+id);
-        if(d){ dist = d; showApp(); }
-      } catch(e){}
+  $("btnAddRet").onclick = async ()=>{
+    const name=$("rName").value.trim();
+    const mobile=$("rMobile").value.replace(/\D/g,"").slice(0,10);
+    const password=$("rPass").value||"123456";
+    const tok=parseInt($("rTok").value,10)||0;
+    if(!name||mobile.length<10) return alert("Name+mobile");
+    dist=await get("distributors/"+distId);
+    if(tok>(dist.tokens||0)) return alert("Aapke tokens kam");
+    const uid="u_"+mobile;
+    const exists=await get("users/"+uid);
+    if(exists) return alert("Already exists");
+    await set("users/"+uid,{
+      name,mobile,password,address:$("rAddr").value.trim(),tokens:tok,status:"active",
+      createdAt:Date.now(),approvedAt:Date.now(),distributorId:distId,
+      tokenHistory: tok?[{type:"credit",amount:tok,reason:"Distributor create",timestamp:Date.now(),balanceAfter:tok}]:[],
+      totalUsed:0,generatedFarmerIds:{}
+    });
+    if(tok>0){
+      const dt=(dist.tokens||0)-tok;
+      const dh=Array.isArray(dist.tokenHistory)?dist.tokenHistory:[];
+      dh.push({type:"debit",amount:tok,reason:"New retailer "+mobile,timestamp:Date.now(),balanceAfter:dt});
+      await update("distributors/"+distId,{tokens:dt,tokenHistory:dh.slice(-50)});
     }
+    alert("Retailer created under you");
+    $("rName").value=$("rMobile").value=$("rAddr").value="";
+    showApp();
+  };
+
+  (async function(){
+    const id=sessionStorage.getItem("distId");
+    if(id){ try{ init(); distId=id; dist=await get("distributors/"+id); if(dist) showApp(); }catch(e){} }
   })();
 })();
 </script>

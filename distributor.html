@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Distributor Panel — Farmer ID</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="loginPage" class="login-page">
+  <div class="login-card">
+    <div class="brand"><span class="brand-icon">🏢</span><h1>Distributor Panel</h1><p>Farmer ID Pro</p></div>
+    <div id="loginError" class="alert alert-err hidden"></div>
+    <label>Mobile</label>
+    <input id="loginMobile" placeholder="10 digit mobile" maxlength="10">
+    <label>Password</label>
+    <input type="password" id="loginPass">
+    <button class="btn btn-primary btn-block" id="btnLogin">Login</button>
+    <p class="hint"><a href="index.html" style="color:#6ee7b7">Admin Login →</a></p>
+  </div>
+</div>
+<div id="app" class="app hidden" style="display:block">
+  <main class="main" style="max-width:900px;margin:0 auto">
+    <header class="topbar">
+      <h2 id="distTitle">Distributor</h2>
+      <div class="topbar-actions">
+        <span class="badge ok" id="tokBadge">Tokens: 0</span>
+        <button class="btn btn-sm" id="btnLogout">Logout</button>
+      </div>
+    </header>
+    <div class="card">
+      <h3>My Retailers — Add Tokens</h3>
+      <p class="muted">Sirf aapke under mapped retailers. Aapke wallet se tokens transfer honge.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>Mobile</th><th>Their Tokens</th><th>Action</th></tr></thead>
+          <tbody id="retTable"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h3>My Token History</h3>
+      <pre id="hist" class="muted" style="white-space:pre-wrap;font-size:12px"></pre>
+    </div>
+  </main>
+</div>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+(function(){
+  let db, distId, dist;
+  const $ = id => document.getElementById(id);
+  function init(){
+    if(!firebase.apps.length) firebase.initializeApp(window.FIREBASE_CONFIG);
+    db = firebase.database();
+  }
+  async function get(path){ return (await db.ref(path).once('value')).val(); }
+  async function update(path, data){ await db.ref(path).update(data); }
+
+  $("btnLogin").onclick = async () => {
+    const err = $("loginError");
+    err.classList.add("hidden");
+    try {
+      init();
+      const mobile = $("loginMobile").value.replace(/\D/g,"").slice(0,10);
+      const pass = $("loginPass").value;
+      const id = "d_" + mobile;
+      const d = await get("distributors/"+id);
+      if(!d || d.password !== pass) throw new Error("Galat mobile/password");
+      if(d.status === "blocked") throw new Error("Account blocked");
+      distId = id; dist = d;
+      sessionStorage.setItem("distId", id);
+      showApp();
+    } catch(e) {
+      err.textContent = e.message || String(e);
+      err.classList.remove("hidden");
+    }
+  };
+  $("btnLogout").onclick = () => { sessionStorage.removeItem("distId"); location.reload(); };
+
+  async function showApp(){
+    $("loginPage").classList.add("hidden");
+    $("app").classList.remove("hidden");
+    $("app").style.display = "block";
+    dist = await get("distributors/"+distId);
+    $("distTitle").textContent = dist.name || "Distributor";
+    $("tokBadge").textContent = "Tokens: " + (dist.tokens||0);
+    const users = (await get("users")) || {};
+    const tbody = $("retTable");
+    tbody.innerHTML = "";
+    Object.entries(users).forEach(([uid,u])=>{
+      if(!u || u.distributorId !== distId) return;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${u.name||""}</td><td>${u.mobile||""}</td><td><b>${u.tokens||0}</b></td>
+        <td><button class="btn btn-sm btn-primary" data-id="${uid}">Transfer tokens</button></td>`;
+      tbody.appendChild(tr);
+    });
+    tbody.onclick = async (e) => {
+      const b = e.target.closest("button");
+      if(!b) return;
+      const uid = b.getAttribute("data-id");
+      const n = parseInt(prompt("Kitne tokens transfer?", "5")||"0",10);
+      if(!n || n<1) return;
+      dist = await get("distributors/"+distId);
+      if((dist.tokens||0) < n) return alert("Aapke paas itne tokens nahi");
+      const u = await get("users/"+uid);
+      if(!u) return;
+      const dt = (dist.tokens||0) - n;
+      const ut = (u.tokens||0) + n;
+      const dh = Array.isArray(dist.tokenHistory)?dist.tokenHistory:[];
+      dh.push({type:"debit",amount:n,reason:"Transfer to "+(u.mobile||uid),timestamp:Date.now(),balanceAfter:dt});
+      const uh = Array.isArray(u.tokenHistory)?u.tokenHistory:[];
+      uh.push({type:"credit",amount:n,reason:"From distributor",timestamp:Date.now(),balanceAfter:ut});
+      await update("distributors/"+distId,{tokens:dt,tokenHistory:dh.slice(-50)});
+      await update("users/"+uid,{tokens:ut,tokenHistory:uh.slice(-50)});
+      alert("Transferred");
+      showApp();
+    };
+    const h = Array.isArray(dist.tokenHistory)?dist.tokenHistory:[];
+    $("hist").textContent = h.slice(-30).reverse().map(x=>`${x.type} ${x.amount} — ${x.reason||""}`).join("\n") || "No history";
+  }
+
+  // auto session
+  (async function(){
+    const id = sessionStorage.getItem("distId");
+    if(id){
+      try {
+        init();
+        distId = id;
+        const d = await get("distributors/"+id);
+        if(d){ dist = d; showApp(); }
+      } catch(e){}
+    }
+  })();
+})();
+</script>
+</body>
+</html>

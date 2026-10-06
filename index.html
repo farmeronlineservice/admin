@@ -4,40 +4,38 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Farmer ID Pro — Admin</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
-<!-- LOGIN -->
 <div id="loginPage" class="login-page">
   <div class="login-card">
-    <div class="brand">
-      <span class="brand-icon">🌾</span>
-      <h1>Farmer ID Pro</h1>
-      <p>Secure Admin Panel</p>
-    </div>
+    <div class="brand"><span class="brand-icon">🌾</span><h1>Farmer ID Pro</h1><p>Secure Admin Panel</p></div>
     <div id="loginError" class="alert alert-err hidden"></div>
     <label>Email</label>
     <input type="email" id="loginEmail" placeholder="admin@email.com" autocomplete="username">
     <label>Password</label>
     <input type="password" id="loginPass" placeholder="••••••••" autocomplete="current-password">
     <button class="btn btn-primary btn-block" id="btnLogin">Login</button>
-    <p class="hint">Firebase Authentication · GitHub / Hosting se open karein</p>
+    <p class="hint"><a href="distributor.html" style="color:#6ee7b7">Distributor Login →</a></p>
   </div>
 </div>
 
-<!-- APP -->
 <div id="app" class="app hidden">
   <aside class="sidebar">
-    <div class="sidebar-brand">🌾 Farmer ID <small>Admin</small></div>
+    <div class="sidebar-brand">🌾 Farmer ID <small>Admin v5.1</small></div>
     <nav>
       <button class="nav active" data-tab="dashboard">📊 Dashboard</button>
       <button class="nav" data-tab="retailers">👥 Retailers</button>
-      <button class="nav" data-tab="pending">⏳ Pending Users</button>
-      <button class="nav" data-tab="tokens">💳 Token Requests</button>
+      <button class="nav" data-tab="pending">⏳ Pending</button>
+      <button class="nav" data-tab="tokens">💳 Token Req</button>
+      <button class="nav" data-tab="distributors">🏢 Distributors</button>
+      <button class="nav" data-tab="logs">📋 Logs</button>
+      <button class="nav" data-tab="passreq">🔑 Pass Req</button>
+      <button class="nav" data-tab="adduser">➕ Add User</button>
       <button class="nav" data-tab="settings">⚙️ Settings</button>
-      <button class="nav" data-tab="payments">💰 Payments</button>
+      <button class="nav" data-tab="backup">💾 Backup</button>
     </nav>
     <div class="sidebar-foot">
       <div id="adminEmail" class="admin-email"></div>
@@ -48,141 +46,183 @@
     <header class="topbar">
       <h2 id="pageTitle">Dashboard</h2>
       <div class="topbar-actions">
-        <span id="dbStatus" class="badge">Connecting…</span>
+        <span id="dbStatus" class="badge">…</span>
         <button class="btn btn-sm" id="btnRefresh">↻ Refresh</button>
       </div>
     </header>
 
-    <!-- DASHBOARD -->
     <section id="tab-dashboard" class="tab">
       <div class="stats">
         <div class="stat"><div class="stat-n" id="sRetailers">0</div><div class="stat-l">Retailers</div></div>
         <div class="stat"><div class="stat-n" id="sActive">0</div><div class="stat-l">Active</div></div>
+        <div class="stat"><div class="stat-n" id="sInactive">0</div><div class="stat-l">Inactive</div></div>
         <div class="stat"><div class="stat-n" id="sPending">0</div><div class="stat-l">Pending Users</div></div>
         <div class="stat"><div class="stat-n" id="sTokPend">0</div><div class="stat-l">Token Pending</div></div>
-        <div class="stat"><div class="stat-n" id="sTokTemp">0</div><div class="stat-l">Temp Approved</div></div>
         <div class="stat"><div class="stat-n" id="sSale">₹0</div><div class="stat-l">Approved Sales</div></div>
       </div>
-      <div class="card">
-        <h3>Quick help</h3>
-        <p class="muted">Token requests yahan se approve/reject karein. Settings me auto-approve aur Razorpay control karein. Retailers ko ⚡ Auto ON se unki payment auto temp-approve hogi.</p>
+      <div class="grid-2">
+        <div class="card"><h3>Monthly Income</h3><canvas id="chartIncome" height="180"></canvas></div>
+        <div class="card"><h3>Pending Summary</h3><div id="pendingSummary" class="muted">—</div>
+          <h3 style="margin-top:16px">Usage Report (7 days)</h3><div id="usageReport" class="muted">—</div></div>
+      </div>
+      <div class="card"><h3>Inactive Retailers (WhatsApp reminder)</h3>
+        <div class="toolbar"><button class="btn btn-sm btn-primary" id="btnMsgInactive">Send list / open WA for inactive</button></div>
+        <div class="table-wrap"><table><thead><tr><th>Name</th><th>Mobile</th><th>Version</th><th>Last Seen</th><th>Used</th><th>Msg</th><th></th></tr></thead><tbody id="inactiveTable"></tbody></table></div>
       </div>
     </section>
 
-    <!-- RETAILERS -->
     <section id="tab-retailers" class="tab hidden">
       <div class="toolbar">
         <input type="search" id="retSearch" placeholder="Search name / mobile…">
+        <select id="retStatus"><option value="">All status</option><option value="active">Active</option><option value="blocked">Blocked</option><option value="temp_approved">Temp</option></select>
+        <select id="retSort"><option value="new">Newest</option><option value="old">Oldest</option><option value="name">Name</option><option value="tokens">Tokens</option><option value="used">Most used</option><option value="seen">Last seen</option></select>
       </div>
       <div class="card table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Mobile</th><th>Tokens</th><th>Status</th><th>Auto Pay</th><th>Actions</th></tr></thead>
+          <thead><tr>
+            <th>Name</th><th>Mobile</th><th>Tokens</th><th>Rate</th><th>Status</th><th>Distributor</th><th>Version</th><th>Last Seen</th><th>Used</th><th>Refill</th><th>Actions</th>
+          </tr></thead>
           <tbody id="retTable"></tbody>
         </table>
       </div>
     </section>
 
-    <!-- PENDING USERS -->
     <section id="tab-pending" class="tab hidden">
       <div class="card table-wrap">
-        <table>
-          <thead><tr><th>Name</th><th>Mobile</th><th>Address</th><th>When</th><th>Actions</th></tr></thead>
-          <tbody id="pendTable"></tbody>
-        </table>
+        <table><thead><tr><th>Name</th><th>Mobile</th><th>Address</th><th>When</th><th>Actions</th></tr></thead>
+        <tbody id="pendTable"></tbody></table>
       </div>
     </section>
 
-    <!-- TOKEN REQUESTS -->
     <section id="tab-tokens" class="tab hidden">
       <div class="toolbar">
-        <select id="tokFilter">
-          <option value="">All</option>
-          <option value="pending">Pending</option>
-          <option value="temp_approved">Temp Approved</option>
-          <option value="approved">Approved</option>
-          <option value="rejected">Rejected</option>
-        </select>
+        <select id="tokFilter"><option value="">All</option><option value="pending">Pending</option><option value="temp_approved">Temp</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select>
       </div>
       <div class="card table-wrap">
-        <table>
-          <thead><tr><th>Date</th><th>Name</th><th>Mobile</th><th>Qty</th><th>Amount</th><th>UTR</th><th>Status</th><th>Actions</th></tr></thead>
-          <tbody id="tokTable"></tbody>
-        </table>
+        <table><thead><tr><th>Date</th><th>Name</th><th>Mobile</th><th>Qty</th><th>Amount</th><th>UTR</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="tokTable"></tbody></table>
       </div>
     </section>
 
-    <!-- SETTINGS -->
+    <section id="tab-distributors" class="tab hidden">
+      <div class="card">
+        <h3>Add Distributor</h3>
+        <div class="toolbar">
+          <input id="dName" placeholder="Name"><input id="dMobile" placeholder="Mobile 10 digit"><input id="dPass" placeholder="Password">
+          <button class="btn btn-primary" id="btnAddDist">Create</button>
+        </div>
+        <p class="muted">Login: <code>distributor.html</code> on same site · Mobile + Password</p>
+      </div>
+      <div class="card table-wrap">
+        <table><thead><tr><th>Name</th><th>Mobile</th><th>Tokens</th><th>Commission</th><th>Retailers</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="distTable"></tbody></table>
+      </div>
+    </section>
+
+    <section id="tab-logs" class="tab hidden">
+      <div class="toolbar">
+        <input type="search" id="logSearch" placeholder="Search…">
+        <select id="logSort"><option value="new">Newest</option><option value="old">Oldest</option></select>
+      </div>
+      <div class="card table-wrap">
+        <table><thead><tr><th>Time</th><th>Retailer</th><th>Farmer</th><th>Place</th><th>Tokens Left</th><th>Cost</th></tr></thead>
+        <tbody id="logTable"></tbody></table>
+      </div>
+    </section>
+
+    <section id="tab-passreq" class="tab hidden">
+      <div class="card table-wrap">
+        <table><thead><tr><th>Time</th><th>Mobile</th><th>Name</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="passTable"></tbody></table>
+      </div>
+    </section>
+
+    <section id="tab-adduser" class="tab hidden">
+      <div class="grid-2">
+        <div class="card">
+          <h3>Add Retailer</h3>
+          <label>Name</label><input id="arName">
+          <label>Mobile</label><input id="arMobile">
+          <label>Password</label><input id="arPass" value="123456">
+          <label>Address</label><input id="arAddr">
+          <label>Map Distributor</label><select id="arDist"><option value="">— None —</option></select>
+          <label>Token rate (blank = default)</label><input id="arRate" type="number" placeholder="default">
+          <label>Start tokens</label><input id="arTokens" type="number" value="0">
+          <button class="btn btn-primary" id="btnAddRet">Create Retailer</button>
+        </div>
+        <div class="card">
+          <h3>Map existing retailer → Distributor</h3>
+          <label>Retailer mobile</label><input id="mapRetMobile" placeholder="10 digit">
+          <label>Distributor</label><select id="mapDist"><option value="">—</option></select>
+          <button class="btn btn-primary" id="btnMap">Save Mapping</button>
+        </div>
+      </div>
+    </section>
+
     <section id="tab-settings" class="tab hidden">
       <div class="grid-2">
         <div class="card">
-          <h3>Auto Approve</h3>
-          <label>Payment Auto Temp-Approve (Global)</label>
+          <h3>Auto / Tokens</h3>
+          <label>Payment Auto Temp-Approve</label>
           <select id="setAutoPay"><option value="0">OFF</option><option value="1">ON</option></select>
-          <label>New Retailer Auto Active (0 tokens)</label>
+          <label>New Retailer Auto Active</label>
           <select id="setAutoRet"><option value="0">OFF</option><option value="1">ON</option></select>
-          <label>Tokens per Farmer ID (0 = free)</label>
+          <label>Default tokens / Farmer ID (0=free)</label>
           <input type="number" id="setTokenCost" min="0" value="1">
           <label>Free Generate Mode</label>
           <select id="setFreeGen"><option value="0">OFF</option><option value="1">ON</option></select>
-          <button class="btn btn-primary" id="btnSaveAuto">Save Auto Settings</button>
+          <label>Inactive after (days)</label>
+          <input type="number" id="setInactiveDays" value="7">
+          <button class="btn btn-primary" id="btnSaveAuto">Save</button>
         </div>
         <div class="card">
-          <h3>Support / UPI</h3>
-          <label>WhatsApp Number</label>
-          <input id="setWa" placeholder="6376965187">
-          <label>Buy Message</label>
-          <textarea id="setBuyMsg" rows="2"></textarea>
-          <label>UPI Link</label>
-          <input id="setUpi" placeholder="upi://pay?pa=...">
+          <h3>Distributor Commission</h3>
+          <p class="muted">Retailer har X token use → distributor wallet me Y token</p>
+          <label>Every N uses</label><input type="number" id="setDistEvery" value="2" min="1">
+          <label>Give tokens</label><input type="number" id="setDistGive" value="1" min="0">
+          <button class="btn btn-primary" id="btnSaveDistComm">Save Commission</button>
+        </div>
+        <div class="card">
+          <h3>WhatsApp / Support</h3>
+          <label>WhatsApp Number</label><input id="setWa">
+          <label>WhatsApp Group Link</label><input id="setWaGroup" placeholder="https://chat.whatsapp.com/...">
+          <label>Buy Message</label><textarea id="setBuyMsg" rows="2"></textarea>
+          <label>Approve message template</label>
+          <textarea id="setApproveMsg" rows="2" placeholder="Account approve! Group join karein: {group}"></textarea>
+          <label>UPI Link</label><input id="setUpi">
           <button class="btn btn-primary" id="btnSaveSupport">Save Support</button>
         </div>
         <div class="card">
-          <h3>Token Rates (₹)</h3>
-          <label>1–5 tokens</label><input type="number" id="rate1" value="20">
-          <label>6–10 tokens</label><input type="number" id="rate2" value="15">
-          <label>11+ tokens</label><input type="number" id="rate3" value="10">
-          <button class="btn btn-primary" id="btnSaveRates">Save Rates</button>
-        </div>
-        <div class="card">
-          <h3>More Service Button</h3>
-          <label>Show button</label>
+          <h3>Rates & Razorpay & More Service</h3>
+          <label>Rate 1–5</label><input type="number" id="rate1" value="20">
+          <label>Rate 6–10</label><input type="number" id="rate2" value="15">
+          <label>Rate 11+</label><input type="number" id="rate3" value="10">
+          <label>Razorpay</label>
+          <select id="rzpEn"><option value="0">OFF</option><option value="1">ON</option></select>
+          <label>Razorpay Key ID</label><input id="rzpKey">
+          <label>More Service</label>
           <select id="setMoreEn"><option value="0">Hide</option><option value="1">Show</option></select>
-          <label>Label</label><input id="setMoreLabel" value="More Service">
-          <label>URL</label><input id="setMoreUrl" placeholder="https://...">
-          <button class="btn btn-primary" id="btnSaveMore">Save</button>
+          <label>More URL</label><input id="setMoreUrl">
+          <button class="btn btn-primary" id="btnSaveRates">Save</button>
         </div>
       </div>
     </section>
 
-    <!-- PAYMENTS -->
-    <section id="tab-payments" class="tab hidden">
-      <div class="grid-2">
-        <div class="card">
-          <h3>Razorpay</h3>
-          <p class="muted">ON = wallet me Pay with Razorpay. OFF = sirf manual UTR/UPI.</p>
-          <label>Status</label>
-          <select id="rzpEn"><option value="0">Disabled (Manual only)</option><option value="1">Enabled</option></select>
-          <label>Key ID</label>
-          <input id="rzpKey" placeholder="rzp_live_xxxx">
-          <label>Key Secret (server only — yahan save optional)</label>
-          <input id="rzpSecret" type="password" placeholder="secret">
-          <button class="btn btn-primary" id="btnSaveRzp">Save Razorpay</button>
-        </div>
-        <div class="card">
-          <h3>Manual refill rules</h3>
-          <ul class="muted">
-            <li>Qty 1–50 + valid UTR → auto temp-approve (agar Global ON + retailer ⚡ Auto ON)</li>
-            <li>UTR: 12/16 digit, ya T+22 digits, ya Razorpay pay_xxx</li>
-            <li>Temp approve = tokens turant wallet me</li>
-            <li>Final Approve = sale confirm</li>
-            <li>Reject/Delete after temp = tokens wapas debit</li>
-          </ul>
-        </div>
+    <section id="tab-backup" class="tab hidden">
+      <div class="card">
+        <h3>Backup</h3>
+        <p class="muted">Poora database JSON download</p>
+        <button class="btn btn-primary" id="btnBackup">Download Backup</button>
+      </div>
+      <div class="card">
+        <h3>Restore</h3>
+        <p class="muted">Purana backup JSON choose karo. Overwrite hoga — careful!</p>
+        <input type="file" id="restoreFile" accept=".json,application/json">
+        <button class="btn btn-warn" id="btnRestore">Restore</button>
       </div>
     </section>
   </main>
 </div>
-
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-database-compat.js"></script>

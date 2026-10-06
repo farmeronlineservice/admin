@@ -739,13 +739,26 @@
   if ($("btnExportAll")) $("btnExportAll").onclick = () => { downloadUsersCsv(); downloadLogsCsv(); };
   if ($("btnRestore")) $("btnRestore").onclick = async () => {
     const f = $("restoreFile").files[0];
-    if (!f || !confirm("Overwrite?")) return;
-    const data = JSON.parse(await f.text());
-    for (const k of Object.keys(data)) {
-      if (k.startsWith("_")) continue;
-      await fbSet(k, data[k]);
+    if (!f) return alert("JSON file choose karein");
+    if (!confirm("RESTORE will OVERWRITE selected nodes. Continue?")) return;
+    let data;
+    try { data = JSON.parse(await f.text()); } catch (e) { return alert("Invalid JSON"); }
+    if (!auth.currentUser) return alert("Admin login required");
+    const keys = Object.keys(data).filter((k) => !k.startsWith("_") && data[k] !== undefined);
+    let ok = 0, fail = 0;
+    for (const k of keys) {
+      try {
+        // force overwrite: remove then set
+        await db.ref(k).set(null);
+        await db.ref(k).set(data[k]);
+        ok++;
+      } catch (e) {
+        console.warn("restore fail", k, e);
+        fail++;
+      }
     }
-    alert("Restored"); await loadAll();
+    alert("Restore done. OK: " + ok + " · Fail: " + fail + (fail ? " (Rules/Auth check)" : ""));
+    await loadAll();
   };
 
   function showStatement(id, u) {
@@ -801,7 +814,16 @@
       if (user) {
         show($("loginPage"), false);
         show($("app"), true);
-        setText("adminEmail", user.email || user.uid);
+        setText("adminEmail", (user.email || "") + " · UID: " + (user.uid || ""));
+        // Remind if not admin in rules
+        try {
+          const adm = await safeGet("adminUids/" + user.uid);
+          if (adm !== true) {
+            console.warn("Add adminUids/" + user.uid + " = true in Firebase Database for full admin access");
+            setText("dbStatus", "Set adminUids/" + user.uid + " = true");
+            const st = $("dbStatus"); if (st) st.className = "badge err";
+          }
+        } catch (e) {}
         await loadAll();
         try {
           db.ref("users").on("value", (s) => { allUsers = s.val() || {}; });

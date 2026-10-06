@@ -73,6 +73,7 @@
   </div>
 </div>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-database-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script>
@@ -80,6 +81,14 @@
   let db, distId, dist;
   const $ = id => document.getElementById(id);
   function init(){ if(!firebase.apps.length) firebase.initializeApp(window.FIREBASE_CONFIG); db = firebase.database(); }
+  async function ensureDistAuth(mobile, password){
+    const email = mobile + "@dist.farmerid.app";
+    try { await firebase.auth().signInWithEmailAndPassword(email, password); }
+    catch(e){
+      try { await firebase.auth().createUserWithEmailAndPassword(email, password); }
+      catch(e2){ throw e2; }
+    }
+  }
   async function get(p){ return (await db.ref(p).once("value")).val(); }
   async function update(p,d){ await db.ref(p).update(d); }
   async function set(p,d){ await db.ref(p).set(d); }
@@ -99,8 +108,11 @@
       init();
       const mobile=$("loginMobile").value.replace(/\D/g,"").slice(0,10);
       const id="d_"+mobile;
+      const pass=$("loginPass").value;
+      // Auth first (secure rules)
+      await ensureDistAuth(mobile, pass);
       const d=await get("distributors/"+id);
-      if(!d||d.password!==$("loginPass").value) throw new Error("Galat mobile/password");
+      if(!d||d.password!==pass) throw new Error("Galat mobile/password");
       if(d.status==="blocked") throw new Error("Blocked");
       distId=id; dist=d;
       sessionStorage.setItem("distId",id);

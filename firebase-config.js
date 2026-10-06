@@ -9,6 +9,6 @@ window.FIREBASE_CONFIG = {
   projectId: "farmer-id-57d6e",
   storageBucket: "farmer-id-57d6e.firebasestorage.app",
   messagingSenderId: "1001241032986",
-  appId: "1:1001241032986:web:da88dcd9c950e29addd4a3"
+  appId: "1:1001241032986:web:cf60308063761ec9ddd4a3"
 };
 

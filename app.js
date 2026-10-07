@@ -4,8 +4,8 @@
   let auth, db;
   let allUsers = {}, allTokenReqs = {}, allDists = {}, allLogs = {}, allPass = {}, allExpenses = {}, settings = {};
   let incomeChart = null;
-  const pageState = { ret: 1, tok: 1, log: 1, pass: 1, inact: 1 };
-  const PAGE = { ret: 50, tok: 50, log: 50, pass: 50, inact: 10 };
+  const pageState = { ret: 1, tok: 1, log: 1, pass: 1, inact: 1, wallet: 1 };
+  const PAGE = { ret: 50, tok: 50, log: 50, pass: 20, inact: 10, wallet: 20 };
 
   const $ = (id) => document.getElementById(id);
   const setText = (id, val) => { const el = $(id); if (el) el.textContent = val; };
@@ -80,7 +80,9 @@
     if (tab === "pending") renderPending();
     if (tab === "tokens") renderTokens();
     if (tab === "distributors") renderDists();
-    if (tab === "logs") renderLogs();
+    if (tab === "logs") {
+      safeGet("usage_logs").then((l) => { allLogs = l || {}; renderLogs(); });
+    }
     if (tab === "passreq") renderPass();
     if (tab === "wallet") renderWallet();
     if (tab === "adduser") fillDistSelects();
@@ -89,14 +91,20 @@
 
   async function loadAll() {
     try {
-      const [u, tq, d, l, p, s, e, inc] = await Promise.all([
+      const tab = (document.querySelector(".nav.active") || {}).dataset
+        ? document.querySelector(".nav.active").dataset.tab
+        : "dashboard";
+      const needLogs = tab === "logs";
+      const [u, tq, d, p, s, e, inc, l] = await Promise.all([
         safeGet("users"), safeGet("token_requests"), safeGet("distributors"),
-        safeGet("usage_logs"), safeGet("password_requests"), safeGet("settings"),
-        safeGet("portal_expenses"), safeGet("admin_income")
+        safeGet("password_requests"), safeGet("settings"),
+        safeGet("portal_expenses"), safeGet("admin_income"),
+        needLogs ? safeGet("usage_logs") : Promise.resolve(allLogs)
       ]);
       allUsers = u || {}; allTokenReqs = tq || {}; allDists = d || {};
-      allLogs = l || {}; allPass = p || {}; settings = s || {};
+      allPass = p || {}; settings = s || {};
       allExpenses = e || {}; window._adminIncome = inc || {};
+      if (needLogs) allLogs = l || {};
       setText("dbStatus", "DB Connected");
       const st = $("dbStatus"); if (st) st.className = "badge ok";
       const active = document.querySelector(".nav.active");
@@ -276,7 +284,9 @@
             <button type="button" data-a="stmt" data-id="${esc(uid)}">Statement</button>
             <button type="button" data-a="rate" data-id="${esc(uid)}">Rate</button>
             <button type="button" data-a="refill" data-id="${esc(uid)}">${u.walletRefillDisabled ? "Refill ON" : "Refill OFF"}</button>
+            <button type="button" data-a="autopay" data-id="${esc(uid)}">${u.autoApprovePayments === false ? "Auto Pay ON" : "Auto Pay OFF"}</button>
             <button type="button" data-a="block" data-id="${esc(uid)}">${u.status === "blocked" ? "Unblock" : "Block"}</button>
+            <button type="button" data-a="del" data-id="${esc(uid)}">Delete</button>
           </div></div></td>`;
       tbody.appendChild(tr);
     });
@@ -334,7 +344,16 @@
       if (n == null) return;
       await fbUpdate("users/" + id, { tokenCost: String(n).trim() === "" ? null : parseInt(n, 10) });
     } else if (a === "refill") await fbUpdate("users/" + id, { walletRefillDisabled: !u.walletRefillDisabled });
-    else if (a === "block") await fbUpdate("users/" + id, { status: u.status === "blocked" ? "active" : "blocked" });
+    else if (a === "autopay") {
+      const currentlyOn = u.autoApprovePayments !== false;
+      const next = !currentlyOn;
+      await fbUpdate("users/" + id, { autoApprovePayments: next });
+      alert(next ? "Wallet Auto-Approve ON" : "Wallet Auto-Approve OFF");
+    } else if (a === "block") await fbUpdate("users/" + id, { status: u.status === "blocked" ? "active" : "blocked" });
+    else if (a === "del") {
+      if (!confirm("Delete retailer permanently?")) return;
+      await fbSet("users/" + id, null);
+    }
     await loadAll();
   }
 
@@ -576,14 +595,21 @@
     setText("wEarn", "₹" + earn);
     setText("wExp", "₹" + exp);
     setText("wNet", "₹" + (inc.reduce((s, x) => s + x.amount, 0) - exp));
+    // pager for earnings (20 / page)
+    const totalE = inc.length;
+    renderPager("walletPager", pageState.wallet, totalE, PAGE.wallet, (np) => { pageState.wallet = np; renderWallet(); });
+    const pages = Math.max(1, Math.ceil(totalE / PAGE.wallet));
+    pageState.wallet = Math.min(pageState.wallet, pages);
+    const slice = inc.slice((pageState.wallet - 1) * PAGE.wallet, pageState.wallet * PAGE.wallet);
     const et = $("earnTable");
     if (et) {
       et.innerHTML = "";
-      inc.slice(0, 100).forEach((x) => {
+      slice.forEach((x) => {
         const tr = document.createElement("tr");
         tr.innerHTML = `<td>${fmtDate(x.ts)}</td><td>${esc(x.type)}</td><td style="color:${x.amount < 0 ? "#fca5a5" : "#6ee7b7"}">₹${x.amount}</td><td class="muted">${esc(x.note || "")}</td>`;
         et.appendChild(tr);
       });
+      if (!slice.length) et.innerHTML = '<tr><td colspan="4" class="muted">No transactions</td></tr>';
     }
     const xt = $("expHistTable");
     if (xt) {
@@ -650,6 +676,7 @@
     setv("rate3", s.rate11plus != null ? s.rate11plus : 10);
     setv("rzpEn", s.razorpayEnabled ? "1" : "0");
     setv("rzpKey", s.razorpayKeyId || "");
+    setv("setManualPay", s.manualPaymentEnabled === false ? "0" : "1");
     setv("setMoreEn", s.moreServiceEnabled ? "1" : "0");
     setv("setMoreUrl", s.moreServiceUrl || "");
   }
@@ -666,7 +693,7 @@
     alert("Saved"); await loadAll();
   };
   if ($("btnSaveRates")) $("btnSaveRates").onclick = async () => {
-    await fbUpdate("settings", { rate1to5: parseFloat($("rate1").value) || 20, rate6to10: parseFloat($("rate2").value) || 15, rate11plus: parseFloat($("rate3").value) || 10, razorpayEnabled: $("rzpEn").value === "1", razorpayKeyId: $("rzpKey").value.trim(), moreServiceEnabled: $("setMoreEn").value === "1", moreServiceUrl: $("setMoreUrl").value.trim() });
+    await fbUpdate("settings", { rate1to5: parseFloat($("rate1").value) || 20, rate6to10: parseFloat($("rate2").value) || 15, rate11plus: parseFloat($("rate3").value) || 10, razorpayEnabled: $("rzpEn").value === "1", razorpayKeyId: $("rzpKey").value.trim(), manualPaymentEnabled: $("setManualPay") ? $("setManualPay").value === "1" : true, moreServiceEnabled: $("setMoreEn").value === "1", moreServiceUrl: $("setMoreUrl").value.trim() });
     alert("Saved"); await loadAll();
   };
 
@@ -825,11 +852,20 @@
           }
         } catch (e) {}
         await loadAll();
-        try {
-          db.ref("users").on("value", (s) => { allUsers = s.val() || {}; });
-          db.ref("token_requests").on("value", (s) => { allTokenReqs = s.val() || {}; });
-          db.ref("settings").on("value", (s) => { settings = s.val() || {}; });
-        } catch (e) {}
+        // Light polling only (no permanent full-tree listeners = fewer downloads)
+        if (window._adminPoll) clearInterval(window._adminPoll);
+        window._adminPoll = setInterval(async () => {
+          try {
+            const [u, tq] = await Promise.all([safeGet("users"), safeGet("token_requests")]);
+            if (u) allUsers = u;
+            if (tq) allTokenReqs = tq;
+            const active = document.querySelector(".nav.active");
+            const tab = active ? active.dataset.tab : "dashboard";
+            if (tab === "dashboard" || tab === "pending" || tab === "tokens" || tab === "retailers") {
+              refreshTab(tab);
+            }
+          } catch (e) {}
+        }, 15000);
       } else {
         show($("app"), false);
         show($("loginPage"), true);

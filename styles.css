@@ -117,3 +117,9 @@ td .btn { margin: 2px; }
   .sidebar nav { flex-direction: row; flex-wrap: wrap; }
 }
 a{color:#6ee7b7}
+
+.table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.card{overflow:visible}
+.dd-menu{max-height:280px;overflow-y:auto}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:800px){.grid-2{grid-template-columns:1fr}}

@@ -118,10 +118,20 @@
         <select id="retSort"><option value="new">Newest</option><option value="old">Oldest</option><option value="name">Name</option><option value="tokens">Tokens</option><option value="used">Most used</option></select>
         <button class="btn btn-sm" id="btnExportRet">Export</button>
       </div>
+      <div class="toolbar" id="bulkBar">
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="retSelectAll"> Select all (page)</label>
+        <button class="btn btn-sm" id="btnBulkAutoOn">Auto Pay ON</button>
+        <button class="btn btn-sm" id="btnBulkAutoOff">Auto Pay OFF</button>
+        <button class="btn btn-sm" id="btnBulkRefillOn">Refill ON</button>
+        <button class="btn btn-sm" id="btnBulkRefillOff">Refill OFF</button>
+        <button class="btn btn-sm" id="btnBulkBlock">Block</button>
+        <button class="btn btn-sm btn-primary" id="btnBulkUnblock">Unblock</button>
+        <span class="muted" id="bulkCount" style="font-size:12px"></span>
+      </div>
       <div class="pager" id="retPager"></div>
       <div class="card table-wrap">
         <table>
-          <thead><tr><th>Name</th><th>Mobile</th><th>Address</th><th>Tokens</th><th>Rate</th><th>Status</th><th>Dist</th><th>Last Seen</th><th>Used</th><th></th></tr></thead>
+          <thead><tr><th></th><th>Name</th><th>Mobile</th><th>Address</th><th>Tokens</th><th>Rate</th><th>Status</th><th>Dist</th><th>Last Seen</th><th>Used</th><th></th></tr></thead>
           <tbody id="retTable"></tbody>
         </table>
       </div>

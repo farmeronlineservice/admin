@@ -270,7 +270,8 @@
       const tr = document.createElement("tr");
       if (!(u.totalUsed > 0)) tr.className = "row-never";
       else if (!(u.tokens > 0)) tr.className = "row-zero";
-      tr.innerHTML = `<td><b>${esc(u.name)}</b></td><td>${esc(u.mobile)}</td>
+      tr.innerHTML = `<td><input type="checkbox" class="ret-cb" data-id="${esc(uid)}"></td>
+        <td><b>${esc(u.name)}</b></td><td>${esc(u.mobile)}</td>
         <td class="muted">${esc((u.address || "").slice(0, 24))}</td><td><b>${u.tokens || 0}</b></td><td>${rate}</td>
         <td><span class="pill ${pill}">${esc(u.status)}</span></td><td>${esc(distName(u.distributorId))}</td>
         <td class="muted">${fmtDate(u.lastSeenAt || u.lastUsed)}</td><td>${u.totalUsed || 0}</td>
@@ -290,7 +291,7 @@
           </div></div></td>`;
       tbody.appendChild(tr);
     });
-    if (!list.length) tbody.innerHTML = '<tr><td colspan="10" class="muted">No data</td></tr>';
+    if (!list.length) tbody.innerHTML = '<tr><td colspan="11" class="muted">No data</td></tr>';
     tbody.onclick = retailerActions;
   }
 
@@ -834,6 +835,39 @@
     }
     if (!e.target.closest(".dd")) document.querySelectorAll(".dd.open").forEach((x) => x.classList.remove("open"));
   });
+
+
+  function selectedRetailerIds() {
+    return Array.from(document.querySelectorAll(".ret-cb:checked")).map((c) => c.dataset.id).filter(Boolean);
+  }
+  function updateBulkCount() {
+    const n = selectedRetailerIds().length;
+    if ($("bulkCount")) $("bulkCount").textContent = n ? n + " selected" : "";
+  }
+  document.addEventListener("change", (e) => {
+    if (e.target && (e.target.id === "retSelectAll" || e.target.classList.contains("ret-cb"))) {
+      if (e.target.id === "retSelectAll") {
+        document.querySelectorAll(".ret-cb").forEach((c) => { c.checked = e.target.checked; });
+      }
+      updateBulkCount();
+    }
+  });
+  async function bulkUpdate(patch, label) {
+    const ids = selectedRetailerIds();
+    if (!ids.length) return alert("Pehle retailers select karein");
+    if (!confirm(label + " — " + ids.length + " retailers?")) return;
+    for (const id of ids) {
+      try { await fbUpdate("users/" + id, patch); } catch (e) { console.warn(id, e); }
+    }
+    alert("Done: " + ids.length);
+    await loadAll();
+  }
+  if ($("btnBulkAutoOn")) $("btnBulkAutoOn").onclick = () => bulkUpdate({ autoApprovePayments: true }, "Auto Pay ON");
+  if ($("btnBulkAutoOff")) $("btnBulkAutoOff").onclick = () => bulkUpdate({ autoApprovePayments: false }, "Auto Pay OFF");
+  if ($("btnBulkRefillOn")) $("btnBulkRefillOn").onclick = () => bulkUpdate({ walletRefillDisabled: false }, "Refill ON");
+  if ($("btnBulkRefillOff")) $("btnBulkRefillOff").onclick = () => bulkUpdate({ walletRefillDisabled: true }, "Refill OFF");
+  if ($("btnBulkBlock")) $("btnBulkBlock").onclick = () => bulkUpdate({ status: "blocked" }, "Block");
+  if ($("btnBulkUnblock")) $("btnBulkUnblock").onclick = () => bulkUpdate({ status: "active" }, "Unblock");
 
   try {
     initFirebase();

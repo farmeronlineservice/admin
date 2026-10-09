@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pay Tokens — Farmer ID</title>
+<style>
+  body{font-family:system-ui,sans-serif;background:#f1f5f9;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+  .card{background:#fff;border-radius:16px;max-width:420px;width:100%;padding:24px;box-shadow:0 12px 40px rgba(0,0,0,.08)}
+  h1{font-size:18px;margin:0 0 8px}
+  p{color:#64748b;font-size:14px;line-height:1.5}
+  .amt{font-size:28px;font-weight:800;color:#0f766e;margin:12px 0}
+  button{width:100%;padding:14px;border:0;border-radius:10px;background:linear-gradient(135deg,#0f766e,#0d9488);color:#fff;font-weight:700;font-size:15px;cursor:pointer}
+  button:disabled{opacity:.6}
+  .err{color:#b91c1c;font-size:13px;margin-top:10px}
+  .ok{color:#047857;font-size:13px;margin-top:10px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>💳 Razorpay Token Payment</h1>
+  <p id="info">Loading…</p>
+  <div class="amt" id="amt">—</div>
+  <button id="btnPay">Pay Now</button>
+  <p id="msg"></p>
+  <p style="margin-top:16px;font-size:12px">Payment successful hone par Payment ID note karein. Extension wallet page par <b>Refresh</b> dabayein — auto-approve ON ho to tokens add ho jayenge.</p>
+</div>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script>
+(function(){
+  const q = new URLSearchParams(location.search);
+  const qty = parseInt(q.get("qty")||"0",10);
+  const total = parseFloat(q.get("total")||"0");
+  const name = q.get("name")||"";
+  const mobile = q.get("mobile")||"";
+  const userId = q.get("userId")||("u_"+String(mobile).replace(/\\D/g,""));
+  const info = document.getElementById("info");
+  const amt = document.getElementById("amt");
+  const msg = document.getElementById("msg");
+  info.textContent = (name||"User") + (mobile?" · "+mobile:"") + " · " + qty + " tokens";
+  amt.textContent = "₹" + total;
+
+  let keyId = "";
+  let db = null;
+
+  async function init(){
+    if(!window.FIREBASE_CONFIG) throw new Error("firebase-config missing");
+    if(!firebase.apps.length) firebase.initializeApp(window.FIREBASE_CONFIG);
+    db = firebase.database();
+    const s = (await db.ref("settings").once("value")).val()||{};
+    if(!s.razorpayEnabled || !s.razorpayKeyId) throw new Error("Razorpay admin se OFF hai");
+    keyId = s.razorpayKeyId;
+  }
+
+  async function createRequest(paymentId){
+    const settings = (await db.ref("settings").once("value")).val()||{};
+    const auto = !!settings.autoApproveEnabled;
+    // per-user auto flag
+    let userAuto = true;
+    try {
+      const u = (await db.ref("users/"+userId).once("value")).val();
+      if(u && u.autoApprovePayments===false) userAuto=false;
+      if(u && u.walletRefillDisabled) throw new Error("Wallet refill band hai");
+    } catch(e){ if(e.message) throw e; }
+    let status = "pending";
+    let autoTemp = false;
+    if(auto && userAuto && qty>=1 && qty<=50){
+      status = "temp_approved";
+      autoTemp = true;
+    }
+    const ref = db.ref("token_requests").push();
+    await ref.set({
+      userId, userName: name, userMobile: mobile,
+      amount: qty, totalAmount: total, utr: paymentId,
+      status, createdAt: Date.now(), autoApproved: autoTemp,
+      source: "razorpay_web"
+    });
+    if(autoTemp){
+      const uref = db.ref("users/"+userId);
+      const u = (await uref.once("value")).val()||{};
+      const tokens = (u.tokens||0)+qty;
+      const h = Array.isArray(u.tokenHistory)?u.tokenHistory:[];
+      h.push({type:"credit",amount:qty,reason:"Razorpay "+paymentId,timestamp:Date.now(),balanceAfter:tokens});
+      await uref.update({tokens, tokenHistory:h.slice(-50)});
+    }
+    return {status, autoTemp};
+  }
+
+  document.getElementById("btnPay").onclick = async function(){
+    const btn = this;
+    btn.disabled = true;
+    msg.className=""; msg.textContent="Preparing…";
+    try{
+      await init();
+      if(typeof Razorpay==="undefined") throw new Error("Razorpay load fail");
+      if(!qty||!total) throw new Error("Invalid amount");
+      const rzp = new Razorpay({
+        key: keyId,
+        amount: Math.round(total*100),
+        currency: "INR",
+        name: "Farmer ID Tokens",
+        description: qty+" tokens",
+        prefill: {name: name, contact: mobile},
+        theme: {color:"#0f766e"},
+        handler: async function(response){
+          try{
+            const pid = response.razorpay_payment_id||("pay_"+Date.now());
+            msg.className="ok";
+            msg.textContent = "Payment OK: "+pid+" — saving…";
+            const r = await createRequest(pid);
+            msg.textContent = r.autoTemp
+              ? "Success! Tokens wallet me add. Extension me Refresh karein."
+              : "Payment saved. Admin approval ke baad tokens milenge. Extension Refresh karein.";
+          }catch(e){
+            msg.className="err";
+            msg.textContent = e.message||String(e);
+          }
+        }
+      });
+      rzp.on("payment.failed", function(resp){
+        msg.className="err";
+        msg.textContent = (resp.error&&resp.error.description)||"Payment failed";
+        btn.disabled=false;
+      });
+      rzp.open();
+      btn.disabled=false;
+    }catch(e){
+      msg.className="err";
+      msg.textContent=e.message||String(e);
+      btn.disabled=false;
+    }
+  };
+})();
+</script>
+</body>
+</html>

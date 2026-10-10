@@ -230,23 +230,27 @@
     setText("sProfit", "₹" + (gross - exp));
     setText("sTokPend", String(reqs.filter((r) => (r.status || "pending") === "pending").length));
     // Token usage counts from usage_logs
-    (async () => {
-      let logs = allLogs;
-      if (!logs || !Object.keys(logs).length) {
-        try { logs = (await safeGet("usage_logs")) || {}; allLogs = logs; } catch (e) { logs = {}; }
-      }
-      let uToday = 0, uMonth = 0, uYear = 0;
-      Object.values(logs || {}).forEach((x) => {
+    // Token use: prefer cached usage_logs; else sum users.totalUsed (no extra download)
+    let uToday = 0, uMonth = 0, uYear = 0;
+    const logs = allLogs || {};
+    const logKeys = Object.keys(logs);
+    if (logKeys.length) {
+      Object.values(logs).forEach((x) => {
         const ts = x && x.timestamp;
         if (!ts) return;
         if (ts >= day0) uToday++;
         if (ts >= month0) uMonth++;
         if (ts >= year0) uYear++;
       });
-      setText("sUseToday", String(uToday));
-      setText("sUseMonth", String(uMonth));
-      setText("sUseYear", String(uYear));
-    })();
+    } else {
+      // fallback without downloading logs
+      uYear = users.reduce((s, u) => s + (Number(u.totalUsed) || 0), 0);
+      uMonth = "—";
+      uToday = "—";
+    }
+    setText("sUseToday", String(uToday));
+    setText("sUseMonth", String(uMonth));
+    setText("sUseYear", String(uYear));
     if ($("pendingSummary")) {
       $("pendingSummary").innerHTML = `Token pending: <b>${reqs.filter((r) => (r.status || "pending") === "pending").length}</b> · Temp: <b>${reqs.filter((r) => r.status === "temp_approved").length}</b> · Users: <b>${users.filter((u) => u.status === "pending").length}</b>`;
     }
@@ -987,21 +991,8 @@
           }
         } catch (e) {}
         await loadAll();
-        // Light polling only (no permanent full-tree listeners = fewer downloads)
-        if (window._adminPoll) clearInterval(window._adminPoll);
-        window._adminPoll = setInterval(async () => {
-          try {
-            const [u, tq] = await Promise.all([safeGet("users"), safeGet("token_requests")]);
-            if (u) allUsers = u;
-            if (tq) allTokenReqs = tq;
-            const active = document.querySelector(".nav.active");
-            const tab = active ? active.dataset.tab : "dashboard";
-            updatePendingNav();
-            if (tab === "dashboard" || tab === "pending" || tab === "tokens" || tab === "retailers") {
-              refreshTab(tab);
-            }
-          } catch (e) {}
-        }, 15000);
+        // No auto-refresh — only Refresh button / page reload (saves RTDB downloads)
+        if (window._adminPoll) { clearInterval(window._adminPoll); window._adminPoll = null; }
       } else {
         show($("app"), false);
         show($("loginPage"), true);

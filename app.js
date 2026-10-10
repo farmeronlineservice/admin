@@ -73,6 +73,69 @@
   });
   $("btnRefresh").onclick = () => loadAll();
   if ($("btnMenu")) $("btnMenu").onclick = () => $("app") && $("app").classList.toggle("sidebar-open");
+  if ($("btnSideToggle")) {
+    $("btnSideToggle").onclick = () => {
+      const app = $("app");
+      if (!app) return;
+      if (window.innerWidth <= 800) app.classList.toggle("sidebar-open");
+      else app.classList.toggle("sidebar-collapsed");
+    };
+  }
+  if ($("pendingNavBadge")) {
+    $("pendingNavBadge").onclick = () => {
+      const btn = document.querySelector('.nav[data-tab="tokens"]');
+      if (btn) btn.click();
+    };
+  }
+  if ($("tempNavBadge")) {
+    $("tempNavBadge").onclick = () => {
+      const btn = document.querySelector('.nav[data-tab="tokens"]');
+      if (btn) btn.click();
+      setTimeout(() => { if ($("tokFilter")) { $("tokFilter").value = "temp_approved"; renderTokens(); } }, 100);
+    };
+  }
+
+
+  let _lastSoundAt = 0;
+  function updatePendingNav() {
+    let pend = 0, temp = 0, userPend = 0;
+    Object.values(allTokenReqs || {}).forEach((r) => {
+      if (!r) return;
+      if (r.status === "pending") pend++;
+      if (r.status === "temp_approved") temp++;
+    });
+    Object.values(allUsers || {}).forEach((u) => {
+      if (u && u.status === "pending") userPend++;
+    });
+    const n = pend + userPend;
+    const badge = $("pendingNavBadge");
+    if (badge) {
+      if (n > 0) {
+        badge.style.display = "inline-block";
+        badge.textContent = n + " Pending";
+        badge.className = "badge err";
+      } else badge.style.display = "none";
+    }
+    const tb = $("tempNavBadge");
+    if (tb) {
+      if (temp > 0) {
+        tb.style.display = "inline-block";
+        tb.textContent = temp + " Temp";
+      } else tb.style.display = "none";
+    }
+    // sound
+    const soundOn = settings.pendingSoundEnabled !== false;
+    if ((pend + temp + userPend) > 0 && soundOn && Date.now() - _lastSoundAt > 8000) {
+      const audio = $("pendingAudio");
+      if (audio) {
+        try {
+          audio.currentTime = 0;
+          audio.play().catch(() => {});
+          _lastSoundAt = Date.now();
+        } catch (e) {}
+      }
+    }
+  }
 
   function refreshTab(tab) {
     if (tab === "dashboard") renderDashboard();
@@ -107,6 +170,7 @@
       if (needLogs) allLogs = l || {};
       setText("dbStatus", "DB Connected");
       const st = $("dbStatus"); if (st) st.className = "badge ok";
+      updatePendingNav();
       const active = document.querySelector(".nav.active");
       refreshTab(active ? active.dataset.tab : "dashboard");
     } catch (e) {
@@ -165,6 +229,24 @@
     setText("sExpense", "₹" + exp);
     setText("sProfit", "₹" + (gross - exp));
     setText("sTokPend", String(reqs.filter((r) => (r.status || "pending") === "pending").length));
+    // Token usage counts from usage_logs
+    (async () => {
+      let logs = allLogs;
+      if (!logs || !Object.keys(logs).length) {
+        try { logs = (await safeGet("usage_logs")) || {}; allLogs = logs; } catch (e) { logs = {}; }
+      }
+      let uToday = 0, uMonth = 0, uYear = 0;
+      Object.values(logs || {}).forEach((x) => {
+        const ts = x && x.timestamp;
+        if (!ts) return;
+        if (ts >= day0) uToday++;
+        if (ts >= month0) uMonth++;
+        if (ts >= year0) uYear++;
+      });
+      setText("sUseToday", String(uToday));
+      setText("sUseMonth", String(uMonth));
+      setText("sUseYear", String(uYear));
+    })();
     if ($("pendingSummary")) {
       $("pendingSummary").innerHTML = `Token pending: <b>${reqs.filter((r) => (r.status || "pending") === "pending").length}</b> · Temp: <b>${reqs.filter((r) => r.status === "temp_approved").length}</b> · Users: <b>${users.filter((u) => u.status === "pending").length}</b>`;
     }
@@ -237,15 +319,31 @@
   }
 
   function renderRetailers() {
+    // version filter options
+    const verSel = $("retVersionFilter");
+    if (verSel) {
+      const cur = verSel.value;
+      const versions = new Set();
+      Object.values(allUsers || {}).forEach((u) => {
+        if (u && u.lastVersion) versions.add(String(u.lastVersion));
+      });
+      const opts = ['<option value="">All versions</option>'].concat(
+        Array.from(versions).sort().map((v) => '<option value="' + esc(v) + '">' + esc(v) + "</option>")
+      );
+      verSel.innerHTML = opts.join("");
+      if (cur) verSel.value = cur;
+    }
     const q = (($("retSearch") && $("retSearch").value) || "").toLowerCase();
     const st = ($("retStatus") && $("retStatus").value) || "";
     const tokF = ($("retTokFilter") && $("retTokFilter").value) || "";
+    const verF = ($("retVersionFilter") && $("retVersionFilter").value) || "";
     const sort = ($("retSort") && $("retSort").value) || "new";
     let list = Object.entries(allUsers || {}).filter(([, u]) => u && u.status !== "pending");
     if (st) list = list.filter(([, u]) => u.status === st);
     if (tokF === "zero") list = list.filter(([, u]) => !(u.tokens > 0));
     if (tokF === "never") list = list.filter(([, u]) => !(u.totalUsed > 0));
     if (tokF === "has") list = list.filter(([, u]) => (u.tokens || 0) > 0);
+    if (verF) list = list.filter(([, u]) => String(u.lastVersion || "") === verF);
     if (q) list = list.filter(([, u]) => (u.name || "").toLowerCase().includes(q) || String(u.mobile || "").includes(q) || (u.address || "").toLowerCase().includes(q));
     list.sort((a, b) => {
       const A = a[1], B = b[1];
@@ -273,7 +371,9 @@
       tr.innerHTML = `<td><input type="checkbox" class="ret-cb" data-id="${esc(uid)}"></td>
         <td><b>${esc(u.name)}</b></td><td>${esc(u.mobile)}</td>
         <td class="muted">${esc((u.address || "").slice(0, 24))}</td><td><b>${u.tokens || 0}</b></td><td>${rate}</td>
-        <td><span class="pill ${pill}">${esc(u.status)}</span></td><td>${esc(distName(u.distributorId))}</td>
+        <td><span class="pill ${pill}">${esc(u.status)}</span></td>
+        <td><code>${esc(u.lastVersion || "—")}</code></td>
+        <td>${esc(distName(u.distributorId))}</td>
         <td class="muted">${fmtDate(u.lastSeenAt || u.lastUsed)}</td><td>${u.totalUsed || 0}</td>
         <td><div class="dd"><button type="button" class="dd-btn" data-dd="1">⋮</button>
           <div class="dd-menu">
@@ -291,7 +391,7 @@
           </div></div></td>`;
       tbody.appendChild(tr);
     });
-    if (!list.length) tbody.innerHTML = '<tr><td colspan="11" class="muted">No data</td></tr>';
+    if (!list.length) tbody.innerHTML = '<tr><td colspan="12" class="muted">No data</td></tr>';
     tbody.onclick = retailerActions;
   }
 
@@ -358,7 +458,7 @@
     await loadAll();
   }
 
-  ["retSearch", "retStatus", "retTokFilter", "retSort"].forEach((id) => {
+  ["retSearch", "retStatus", "retTokFilter", "retVersionFilter", "retSort"].forEach((id) => {
     if ($(id)) $(id).oninput = $(id).onchange = () => { pageState.ret = 1; renderRetailers(); };
   });
 
@@ -664,6 +764,7 @@
     setv("setTokenCost", s.tokenCost != null ? s.tokenCost : 1);
     setv("setFreeGen", s.freeGenerateEnabled ? "1" : "0");
     setv("setInactiveDays", s.inactiveDays || 7);
+    setv("setSound", s.pendingSoundEnabled === false ? "0" : "1");
     setv("setDistEvery", s.distCommissionEvery || 2);
     setv("setDistGive", s.distCommissionGive != null ? s.distCommissionGive : 1);
     setv("setWa", s.whatsappNumber || "");
@@ -682,7 +783,7 @@
     setv("setMoreUrl", s.moreServiceUrl || "");
   }
   if ($("btnSaveAuto")) $("btnSaveAuto").onclick = async () => {
-    await fbUpdate("settings", { autoApproveEnabled: $("setAutoPay").value === "1", autoTempApproveRetailer: $("setAutoRet").value === "1", tokenCost: parseInt($("setTokenCost").value, 10) || 0, freeGenerateEnabled: $("setFreeGen").value === "1", inactiveDays: parseInt($("setInactiveDays").value, 10) || 7 });
+    await fbUpdate("settings", { autoApproveEnabled: $("setAutoPay").value === "1", autoTempApproveRetailer: $("setAutoRet").value === "1", tokenCost: parseInt($("setTokenCost").value, 10) || 0, freeGenerateEnabled: $("setFreeGen").value === "1", inactiveDays: parseInt($("setInactiveDays").value, 10) || 7, pendingSoundEnabled: $("setSound") ? $("setSound").value === "1" : true });
     alert("Saved"); await loadAll();
   };
   if ($("btnSaveDistComm")) $("btnSaveDistComm").onclick = async () => {
@@ -895,6 +996,7 @@
             if (tq) allTokenReqs = tq;
             const active = document.querySelector(".nav.active");
             const tab = active ? active.dataset.tab : "dashboard";
+            updatePendingNav();
             if (tab === "dashboard" || tab === "pending" || tab === "tokens" || tab === "retailers") {
               refreshTab(tab);
             }

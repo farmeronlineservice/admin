@@ -24,6 +24,11 @@
 .modal{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:1000;padding:16px}
 .modal.hidden{display:none!important}
 .modal-box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;width:100%;max-width:440px;max-height:90vh;overflow:auto}
+.app.sidebar-collapsed .sidebar{width:0;min-width:0;padding:0;overflow:hidden;border:0}
+.app.sidebar-collapsed .main{margin-left:0;width:100%}
+#btnSideToggle{margin-right:8px}
+#pendingNavBadge{font-weight:700}
+audio#pendingAudio{display:none}
 @media(max-width:800px){
   .menu-fab{display:flex;align-items:center;justify-content:center}
   .sidebar{position:fixed;left:0;top:0;bottom:0;z-index:800;transform:translateX(-105%);transition:.2s;width:min(280px,86vw)}
@@ -49,6 +54,7 @@
 </div>
 
 <div id="app" class="app hidden">
+  <audio id="pendingAudio" src="pending-alert.mp3" preload="auto"></audio>
   <button type="button" id="btnMenu" class="menu-fab">☰</button>
   <aside class="sidebar">
     <div class="sidebar-brand">🌾 Farmer ID <small>Admin v5.2</small></div>
@@ -72,8 +78,11 @@
   </aside>
   <main class="main">
     <header class="topbar">
+      <button type="button" id="btnSideToggle" class="btn btn-sm" title="Sidebar">☰</button>
       <h2 id="pageTitle">Dashboard</h2>
       <div class="topbar-actions">
+        <span id="pendingNavBadge" class="badge err" style="display:none;cursor:pointer" title="Pending">0 Pending</span>
+        <span id="tempNavBadge" class="badge" style="display:none;cursor:pointer;background:#f59e0b;color:#111" title="Temp approved">0 Temp</span>
         <span id="dbStatus" class="badge">…</span>
         <button class="btn btn-sm" id="btnRefresh">↻ Refresh</button>
       </div>
@@ -87,6 +96,9 @@
         <div class="stat"><div class="stat-n" id="sExpense">₹0</div><div class="stat-l">Total Expense</div></div>
         <div class="stat"><div class="stat-n" id="sProfit">₹0</div><div class="stat-l">Net Profit</div></div>
         <div class="stat"><div class="stat-n" id="sTokPend">0</div><div class="stat-l">Token Pending</div></div>
+        <div class="stat"><div class="stat-n" id="sUseToday">0</div><div class="stat-l">Token Use Today</div></div>
+        <div class="stat"><div class="stat-n" id="sUseMonth">0</div><div class="stat-l">Token Use Month</div></div>
+        <div class="stat"><div class="stat-n" id="sUseYear">0</div><div class="stat-l">Token Use Year</div></div>
       </div>
       <div class="grid-2">
         <div class="card"><h3>Income</h3><div style="height:140px"><canvas id="chartIncome"></canvas></div></div>
@@ -115,6 +127,7 @@
         <input type="search" id="retSearch" placeholder="Search…">
         <select id="retStatus"><option value="">All status</option><option value="active">Active</option><option value="blocked">Blocked</option></select>
         <select id="retTokFilter"><option value="">All tokens</option><option value="zero">0 tokens (blue)</option><option value="never">Never used (red)</option><option value="has">Has tokens</option></select>
+        <select id="retVersionFilter"><option value="">All versions</option></select>
         <select id="retSort"><option value="new">Newest</option><option value="old">Oldest</option><option value="name">Name</option><option value="tokens">Tokens</option><option value="used">Most used</option></select>
         <button class="btn btn-sm" id="btnExportRet">Export</button>
       </div>
@@ -131,7 +144,7 @@
       <div class="pager" id="retPager"></div>
       <div class="card table-wrap">
         <table>
-          <thead><tr><th></th><th>Name</th><th>Mobile</th><th>Address</th><th>Tokens</th><th>Rate</th><th>Status</th><th>Dist</th><th>Last Seen</th><th>Used</th><th></th></tr></thead>
+          <thead><tr><th></th><th>Name</th><th>Mobile</th><th>Address</th><th>Tokens</th><th>Rate</th><th>Status</th><th>Ver</th><th>Dist</th><th>Last Seen</th><th>Used</th><th></th></tr></thead>
           <tbody id="retTable"></tbody>
         </table>
       </div>
@@ -244,6 +257,8 @@
           <label>Free Generate</label>
           <select id="setFreeGen"><option value="0">OFF</option><option value="1">ON</option></select>
           <label>Inactive after (days)</label><input type="number" id="setInactiveDays" value="7">
+          <label>Pending notification sound</label>
+          <select id="setSound"><option value="1">ON</option><option value="0">OFF</option></select>
           <button class="btn btn-primary" id="btnSaveAuto">Save</button>
         </div>
         <div class="card">

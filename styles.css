@@ -123,3 +123,11 @@ a{color:#6ee7b7}
 .dd-menu{max-height:280px;overflow-y:auto}
 .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:800px){.grid-2{grid-template-columns:1fr}}
+
+.app { display: flex; min-height: 100vh; }
+.sidebar { width: 240px; flex-shrink: 0; transition: width .2s, min-width .2s; }
+.main { flex: 1; min-width: 0; transition: margin .2s; }
+.app.sidebar-collapsed .sidebar {
+  width: 0 !important; min-width: 0 !important; overflow: hidden; border: none; padding: 0;
+}
+.topbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

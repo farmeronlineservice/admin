@@ -442,6 +442,7 @@
             <button type="button" data-a="refill" data-id="${esc(uid)}">${u.walletRefillDisabled ? "Refill ON" : "Refill OFF"}</button>
             <button type="button" data-a="autopay" data-id="${esc(uid)}">${u.autoApprovePayments === false ? "Auto Pay ON" : "Auto Pay OFF"}</button>
             <button type="button" data-a="block" data-id="${esc(uid)}">${u.status === "blocked" ? "Unblock" : "Block"}</button>
+            ${(u.status === "temp_approved" || u.status === "pending") ? `<button type="button" data-a="final" data-id="${esc(uid)}">Final Approve</button>` : ""}
             <button type="button" data-a="del" data-id="${esc(uid)}">Delete</button>
           </div></div></td>`;
       tbody.appendChild(tr);
@@ -457,6 +458,19 @@
     const u = allUsers[id];
     if (!u) return;
     const a = b.dataset.a;
+    if (a === "final") {
+      if (!confirm("Final approve this retailer?")) return;
+      const free = parseInt(prompt("Free tokens on final approve (extra)?", "0") || "0", 10) || 0;
+      const tokens = (u.tokens || 0) + free;
+      const hist = Array.isArray(u.tokenHistory) ? u.tokenHistory.slice() : [];
+      if (free > 0) hist.push({ type: "credit", amount: free, reason: "Final approve bonus", timestamp: Date.now(), balanceAfter: tokens });
+      await fbUpdate("users/" + id, {
+        status: "active", tokens, freeTokens: (u.freeTokens || 0) + free,
+        approvedAt: Date.now(), finalApprovedAt: Date.now(), awaitingFinalApprove: false, tokenHistory: hist
+      });
+      await loadAll();
+      return;
+    }
     if (a === "edit") {
       $("edId").value = id;
       $("edName").value = u.name || "";
@@ -537,9 +551,13 @@
       const id = b.dataset.id;
       const u = allUsers[id];
       if (b.dataset.a === "temp") {
-        const free = parseInt(settings.freeTokensOnTempApprove, 10);
-        const n = Number.isFinite(free) ? free : 1;
-        await fbUpdate("users/" + id, { status: "temp_approved", tokens: n, freeTokens: n, tempApprovedAt: Date.now(), awaitingFinalApprove: true });
+        let n = parseInt(settings.freeTokensOnTempApprove, 10);
+        if (!Number.isFinite(n)) n = 1;
+        n = Math.max(0, n);
+        const cur = allUsers[id] || {};
+        const hist = Array.isArray(cur.tokenHistory) ? cur.tokenHistory.slice() : [];
+        if (n > 0) hist.push({ type: "credit", amount: n, reason: "Free tokens on TEMP approve", timestamp: Date.now(), balanceAfter: n });
+        await fbUpdate("users/" + id, { status: "temp_approved", tokens: n, freeTokens: n, tempApprovedAt: Date.now(), awaitingFinalApprove: true, tokenHistory: hist });
         await loadAll();
         return;
       }
@@ -899,10 +917,20 @@
   };
 
   function exportCsv(name, rows) {
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([rows], { type: "text/csv" }));
-    a.download = name;
-    a.click();
+    try {
+      const bom = "\uFEFF"; // Excel UTF-8
+      const blob = new Blob([bom + rows], { type: "text/csv;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { try { document.body.removeChild(a); URL.revokeObjectURL(url); } catch (e) {} }, 500);
+    } catch (e) {
+      alert("Download fail: " + (e.message || e));
+    }
   }
   function downloadUsersCsv() {
     let u = "id,name,mobile,password,tokens,status,address,totalUsed\n";
@@ -1036,6 +1064,26 @@
   if ($("btnBulkRefillOff")) $("btnBulkRefillOff").onclick = () => bulkUpdate({ walletRefillDisabled: true }, "Refill OFF");
   if ($("btnBulkBlock")) $("btnBulkBlock").onclick = () => bulkUpdate({ status: "blocked" }, "Block");
   if ($("btnBulkUnblock")) $("btnBulkUnblock").onclick = () => bulkUpdate({ status: "active" }, "Unblock");
+  if ($("btnBulkFinal")) $("btnBulkFinal").onclick = async () => {
+    const ids = selectedRetailerIds();
+    if (!ids.length) return alert("Pehle retailers select karein");
+    if (!confirm("Final Approve " + ids.length + " selected?")) return;
+    for (const id of ids) {
+      const u = allUsers[id];
+      if (!u) continue;
+      if (u.status !== "temp_approved" && u.status !== "pending") continue;
+      try {
+        await fbUpdate("users/" + id, {
+          status: "active",
+          approvedAt: Date.now(),
+          finalApprovedAt: Date.now(),
+          awaitingFinalApprove: false
+        });
+      } catch (e) { console.warn(id, e); }
+    }
+    alert("Final approve done");
+    await loadAll();
+  };
 
   try {
     initFirebase();
@@ -1084,7 +1132,7 @@
 
   // --- Retailer CSV template + import ---
   if ($("btnRetTemplate")) $("btnRetTemplate").onclick = () => {
-    const csv = "name,mobile,password,address,tokens\nRam Kumar,9876543210,123456,Jaipur Rajasthan,0\n";
+    const csv = "name,mobile,password,address,tokens\nRam Kumar,9876543210,123456,Jaipur Rajasthan,0\nSita Devi,9876543211,123456,Kota Rajasthan,0\n";
     exportCsv("retailer-import-template.csv", csv);
   };
   if ($("retImportFile")) $("retImportFile").onchange = async (ev) => {

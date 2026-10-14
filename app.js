@@ -5,7 +5,7 @@
   let allUsers = {}, allTokenReqs = {}, allDists = {}, allLogs = {}, allPass = {}, allExpenses = {}, settings = {};
   let incomeChart = null;
   const pageState = { ret: 1, tok: 1, log: 1, pass: 1, inact: 1, wallet: 1 };
-  const PAGE = { ret: 50, tok: 50, log: 50, pass: 20, inact: 10, wallet: 20 };
+  const PAGE = { ret: 10, tok: 10, log: 10, pass: 10, inact: 10, wallet: 10 };
 
   const $ = (id) => document.getElementById(id);
   const setText = (id, val) => { const el = $(id); if (el) el.textContent = val; };
@@ -144,7 +144,13 @@
     if (tab === "tokens") renderTokens();
     if (tab === "distributors") renderDists();
     if (tab === "logs") {
-      safeGet("usage_logs").then((l) => { allLogs = l || {}; renderLogs(); });
+      // No auto download — user must click Generate (saves Firebase bandwidth)
+      if (!window._logsLoadedOnce) {
+        allLogs = allLogs || {};
+        renderLogs();
+      } else {
+        renderLogs();
+      }
     }
     if (tab === "passreq") renderPass();
     if (tab === "wallet") renderWallet();
@@ -157,7 +163,7 @@
       const tab = (document.querySelector(".nav.active") || {}).dataset
         ? document.querySelector(".nav.active").dataset.tab
         : "dashboard";
-      const needLogs = tab === "logs";
+      const needLogs = false; // logs only via Generate button
       const [u, tq, d, p, s, e, inc, l] = await Promise.all([
         safeGet("users"), safeGet("token_requests"), safeGet("distributors"),
         safeGet("password_requests"), safeGet("settings"),
@@ -476,6 +482,7 @@
         tr.innerHTML = `<td>${esc(u.name)}</td><td>${esc(u.mobile)}</td><td class="muted">${esc((u.address || "").slice(0, 30))}</td>
           <td>${fmtDate(u.createdAt)}</td>
           <td><button class="btn btn-sm btn-primary" data-a="ok" data-id="${esc(uid)}">Approve+WA</button>
+          <button class="btn btn-sm btn-warn" data-a="temp" data-id="${esc(uid)}">Temp</button>
           <button class="btn btn-sm btn-danger" data-a="del" data-id="${esc(uid)}">Del</button></td>`;
         tbody.appendChild(tr);
       });
@@ -484,6 +491,13 @@
       if (!b) return;
       const id = b.dataset.id;
       const u = allUsers[id];
+      if (b.dataset.a === "temp") {
+        const free = parseInt(settings.freeTokensOnTempApprove, 10);
+        const n = Number.isFinite(free) ? free : 1;
+        await fbUpdate("users/" + id, { status: "temp_approved", tokens: n, freeTokens: n, tempApprovedAt: Date.now(), awaitingFinalApprove: true });
+        await loadAll();
+        return;
+      }
       if (b.dataset.a === "ok") {
         const free = parseInt(prompt("Free tokens?", "2") || "2", 10) || 0;
         await fbUpdate("users/" + id, { status: "active", tokens: free, freeTokens: free, approvedAt: Date.now(), finalApprovedAt: Date.now(), awaitingFinalApprove: false });
@@ -641,7 +655,7 @@
     if (!tbody) return;
     tbody.innerHTML = "";
     list.forEach((x) => {
-      const place = [x.taluka, x.district, x.state].filter(Boolean).join(", ");
+      const place = [x.village, x.taluka, x.district, x.state, x.pincode || x.pin].filter(Boolean).join(", ");
       const tr = document.createElement("tr");
       tr.innerHTML = `<td class="muted">${fmtDate(x.timestamp)}</td>
         <td>${esc(x.userName)} <span class="muted">${esc(x.userMobile)}</span></td>
@@ -765,6 +779,7 @@
     const setv = (id, v) => { if ($(id)) $(id).value = v; };
     setv("setAutoPay", s.autoApproveEnabled ? "1" : "0");
     setv("setAutoRet", s.autoTempApproveRetailer ? "1" : "0");
+    setv("setFreeTempTok", s.freeTokensOnTempApprove != null ? s.freeTokensOnTempApprove : 1);
     setv("setTokenCost", s.tokenCost != null ? s.tokenCost : 1);
     setv("setFreeGen", s.freeGenerateEnabled ? "1" : "0");
     setv("setInactiveDays", s.inactiveDays || 7);
@@ -787,7 +802,7 @@
     setv("setMoreUrl", s.moreServiceUrl || "");
   }
   if ($("btnSaveAuto")) $("btnSaveAuto").onclick = async () => {
-    await fbUpdate("settings", { autoApproveEnabled: $("setAutoPay").value === "1", autoTempApproveRetailer: $("setAutoRet").value === "1", tokenCost: parseInt($("setTokenCost").value, 10) || 0, freeGenerateEnabled: $("setFreeGen").value === "1", inactiveDays: parseInt($("setInactiveDays").value, 10) || 7, pendingSoundEnabled: $("setSound") ? $("setSound").value === "1" : true });
+    await fbUpdate("settings", { autoApproveEnabled: $("setAutoPay").value === "1", autoTempApproveRetailer: $("setAutoRet").value === "1", freeTokensOnTempApprove: parseInt(($("setFreeTempTok") && $("setFreeTempTok").value) || "1", 10) || 0, tokenCost: parseInt($("setTokenCost").value, 10) || 0, freeGenerateEnabled: $("setFreeGen").value === "1", inactiveDays: parseInt($("setInactiveDays").value, 10) || 7, pendingSoundEnabled: $("setSound") ? $("setSound").value === "1" : true });
     alert("Saved"); await loadAll();
   };
   if ($("btnSaveDistComm")) $("btnSaveDistComm").onclick = async () => {
@@ -851,12 +866,13 @@
     exportCsv("users.csv", u);
   }
   function downloadLogsCsv() {
-    let l = "time,retailer,mobile,farmer,farmerId,cscId,cost\n";
+    let l = "time,retailer,mobile,farmer,farmerId,cscId,village,taluka,district,state,pincode,tokensLeft,cost,portalUrl\n";
     Object.values(allLogs || {}).forEach((x) => {
-      if (!x) return;
-      l += [fmtDate(x.timestamp), x.userName, x.userMobile, x.name, x.farmerId, x.cscUserId, x.costCharged].map((v) => '"' + String(v ?? "").replace(/"/g, "'") + '"').join(",") + "\n";
+      if (!x || !x.timestamp) return;
+      l += [new Date(x.timestamp).toISOString(), x.userName, x.userMobile, x.name, x.farmerId, x.cscUserId, x.village, x.taluka, x.district, x.state, x.pincode || x.pin, x.tokensLeft, x.costCharged, x.portalUrl]
+        .map((v) => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"').join(",") + "\n";
     });
-    exportCsv("logs.csv", l);
+    exportCsv("logs-full.csv", l);
   }
   if ($("btnExportRet")) $("btnExportRet").onclick = downloadUsersCsv;
   if ($("btnExportLogs")) $("btnExportLogs").onclick = downloadLogsCsv;
@@ -1003,3 +1019,105 @@
     if (err) { err.textContent = e.message || String(e); show(err, true); }
   }
 })();
+
+
+
+  // --- Bulk delete selected retailers ---
+  if ($("btnBulkDelete")) $("btnBulkDelete").onclick = async () => {
+    const ids = selectedRetailerIds();
+    if (!ids.length) return alert("Pehle retailers select karein");
+    if (!confirm("PERMANENT delete " + ids.length + " retailers?")) return;
+    for (const id of ids) {
+      try { await fbSet("users/" + id, null); } catch (e) {}
+    }
+    alert("Deleted " + ids.length);
+    await loadAll();
+  };
+
+  // --- Retailer CSV template + import ---
+  if ($("btnRetTemplate")) $("btnRetTemplate").onclick = () => {
+    const csv = "name,mobile,password,address,tokens\nRam Kumar,9876543210,123456,Jaipur Rajasthan,0\n";
+    exportCsv("retailer-import-template.csv", csv);
+  };
+  if ($("retImportFile")) $("retImportFile").onchange = async (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    if (lines.length < 2) return alert("Empty file");
+    const headers = lines[0].split(",").map((h) => h.trim().toLowerCase().replace(/"/g, ""));
+    let ok = 0, fail = 0;
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].match(/("([^"]|"")*"|[^,]*)/g) || lines[i].split(",");
+      const cells = cols.map((c) => String(c || "").replace(/^"|"$/g, "").replace(/""/g, '"').trim());
+      const obj = {};
+      headers.forEach((h, j) => { obj[h] = cells[j] || ""; });
+      const mobile = String(obj.mobile || "").replace(/\D/g, "");
+      if (mobile.length < 10) { fail++; continue; }
+      const id = "u_" + mobile;
+      const exists = await safeGet("users/" + id);
+      if (exists) { fail++; continue; }
+      const tokens = parseInt(obj.tokens, 10) || 0;
+      await fbSet("users/" + id, {
+        name: obj.name || mobile, mobile, password: obj.password || "123456",
+        address: obj.address || "", tokens, freeTokens: 0, status: "temp_approved",
+        createdAt: Date.now(), tempApprovedAt: Date.now(), awaitingFinalApprove: true,
+        role: "retailer", totalUsed: 0, generatedFarmerIds: {}, tokenHistory: []
+      });
+      ok++;
+    }
+    alert("Imported: " + ok + " | Skipped: " + fail);
+    ev.target.value = "";
+    await loadAll();
+  };
+  if ($("btnExportDb")) $("btnExportDb").onclick = async () => {
+    const data = { _exportedAt: Date.now() };
+    for (const p of ["users", "token_requests", "distributors", "usage_logs", "password_requests", "settings", "portal_expenses", "admin_income", "device_bindings"]) {
+      data[p] = await safeGet(p);
+    }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "farmer-id-db-export.json";
+    a.click();
+  };
+
+  // --- Logs: date range Generate (only then fetch) ---
+  function todayISO() {
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function initLogDates() {
+    if ($("logFrom") && !$("logFrom").value) $("logFrom").value = todayISO();
+    if ($("logTo") && !$("logTo").value) $("logTo").value = todayISO();
+  }
+  initLogDates();
+  if ($("btnLogGenerate")) $("btnLogGenerate").onclick = async () => {
+    initLogDates();
+    const from = $("logFrom").value;
+    const to = $("logTo").value;
+    const btn = $("btnLogGenerate");
+    if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
+    try {
+      // Full logs fetch then filter by date (RTDB has limited range queries without index)
+      const raw = await safeGet("usage_logs") || {};
+      const fromTs = from ? new Date(from + "T00:00:00").getTime() : 0;
+      const toTs = to ? new Date(to + "T23:59:59").getTime() : Date.now();
+      const filtered = {};
+      Object.entries(raw).forEach(([k, v]) => {
+        if (!v || !v.timestamp) return;
+        if (v.timestamp >= fromTs && v.timestamp <= toTs) filtered[k] = v;
+      });
+      allLogs = filtered;
+      window._logsLoadedOnce = true;
+      pageState.log = 1;
+      renderLogs();
+      if ($("logHint")) $("logHint").textContent = "Showing " + Object.keys(filtered).length + " logs from " + from + " to " + to;
+    } catch (e) {
+      alert("Logs load fail: " + (e.message || e));
+    }
+    if (btn) { btn.disabled = false; btn.textContent = "Generate"; }
+  };
+
+  // freeTokensOnTempApprove in settings save/load if fields exist
+  // (settings render elsewhere — patch settings object default)

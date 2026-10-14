@@ -139,7 +139,13 @@ audio#pendingAudio{display:none}
         <button class="btn btn-sm" id="btnBulkRefillOff">Refill OFF</button>
         <button class="btn btn-sm" id="btnBulkBlock">Block</button>
         <button class="btn btn-sm btn-primary" id="btnBulkUnblock">Unblock</button>
+        <button class="btn btn-sm btn-danger" id="btnBulkDelete">Delete selected</button>
         <span class="muted" id="bulkCount" style="font-size:12px"></span>
+      </div>
+      <div class="toolbar">
+        <button class="btn btn-sm" id="btnRetTemplate">Download Excel template</button>
+        <label class="btn btn-sm" style="cursor:pointer">Import Excel/CSV<input type="file" id="retImportFile" accept=".csv,.txt,.xlsx" hidden></label>
+        <button class="btn btn-sm" id="btnExportDb">Export full DB (JSON)</button>
       </div>
       <div class="pager" id="retPager"></div>
       <div class="card table-wrap">
@@ -185,12 +191,16 @@ audio#pendingAudio{display:none}
 
     <section id="tab-logs" class="tab hidden">
       <div class="toolbar">
+        <label>From <input type="date" id="logFrom"></label>
+        <label>To <input type="date" id="logTo"></label>
+        <button class="btn btn-sm btn-primary" id="btnLogGenerate">Generate</button>
         <input type="search" id="logSearch" placeholder="Search…">
         <select id="logSort"><option value="new">Newest</option><option value="old">Oldest</option></select>
-        <button class="btn btn-sm" id="btnExportLogs">Export logs</button>
+        <button class="btn btn-sm" id="btnExportLogs">Export logs (full filtered)</button>
         <button class="btn btn-sm" id="btnExportUsers2">Export users</button>
         <button class="btn btn-sm btn-danger" id="btnClearLogs">Delete all logs</button>
       </div>
+      <p class="muted" id="logHint" style="font-size:12px;margin:6px 0">Default date = today. Logs tab open par auto-load nahi hota — Generate dabayein.</p>
       <div class="pager" id="logPager"></div>
       <div class="card table-wrap">
         <table><thead><tr><th>Time</th><th>Retailer</th><th>Farmer</th><th>CSC ID</th><th>Place</th><th>Left</th><th>Cost</th><th></th></tr></thead>
@@ -245,6 +255,7 @@ audio#pendingAudio{display:none}
       </div>
     </section>
 
+    <!-- freeTokensOnTempApprove wired in app.js settings -->
     <section id="tab-settings" class="tab hidden">
       <div class="grid-2">
         <div class="card">
@@ -253,6 +264,7 @@ audio#pendingAudio{display:none}
           <select id="setAutoPay"><option value="0">OFF</option><option value="1">ON</option></select>
           <label>New Retailer Auto Active</label>
           <select id="setAutoRet"><option value="0">OFF</option><option value="1">ON</option></select>
+          <label>Free tokens on TEMP approve</label><input type="number" id="setFreeTempTok" min="0" value="1">
           <label>Default tokens / ID</label><input type="number" id="setTokenCost" value="1">
           <label>Free Generate</label>
           <select id="setFreeGen"><option value="0">OFF</option><option value="1">ON</option></select>

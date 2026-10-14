@@ -193,14 +193,16 @@ audio#pendingAudio{display:none}
       <div class="toolbar">
         <label>From <input type="date" id="logFrom"></label>
         <label>To <input type="date" id="logTo"></label>
-        <button class="btn btn-sm btn-primary" id="btnLogGenerate">Generate</button>
-        <input type="search" id="logSearch" placeholder="Search…">
+        <button type="button" class="btn btn-sm btn-primary" id="btnLogGenerate">Generate</button>
+        <input type="search" id="logSearch" placeholder="Search retailer / farmer / CSC…">
         <select id="logSort"><option value="new">Newest</option><option value="old">Oldest</option></select>
-        <button class="btn btn-sm" id="btnExportLogs">Export logs (full filtered)</button>
-        <button class="btn btn-sm" id="btnExportUsers2">Export users</button>
-        <button class="btn btn-sm btn-danger" id="btnClearLogs">Delete all logs</button>
       </div>
-      <p class="muted" id="logHint" style="font-size:12px;margin:6px 0">Default date = today. Logs tab open par auto-load nahi hota — Generate dabayein.</p>
+      <div class="toolbar">
+        <button type="button" class="btn btn-sm" id="btnExportLogs">Export logs</button>
+        <button type="button" class="btn btn-sm" id="btnExportUsers2">Export users</button>
+        <button type="button" class="btn btn-sm btn-danger" id="btnClearLogs">Delete all logs</button>
+      </div>
+      <p class="muted" id="logHint" style="font-size:12px;margin:6px 0">Default date = aaj. Generate dabane par hi logs load honge.</p>
       <div class="pager" id="logPager"></div>
       <div class="card table-wrap">
         <table><thead><tr><th>Time</th><th>Retailer</th><th>Farmer</th><th>CSC ID</th><th>Place</th><th>Left</th><th>Cost</th><th></th></tr></thead>

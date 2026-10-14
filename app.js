@@ -7,6 +7,51 @@
   const pageState = { ret: 1, tok: 1, log: 1, pass: 1, inact: 1, wallet: 1 };
   const PAGE = { ret: 10, tok: 10, log: 10, pass: 10, inact: 10, wallet: 10 };
 
+  function todayISO() {
+    const d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function initLogDates() {
+    const t = todayISO();
+    const f = $("logFrom");
+    const to = $("logTo");
+    if (f && !f.value) f.value = t;
+    if (to && !to.value) to.value = t;
+  }
+  async function loadLogsByDate() {
+    initLogDates();
+    const from = ($("logFrom") && $("logFrom").value) || todayISO();
+    const to = ($("logTo") && $("logTo").value) || todayISO();
+    const btn = $("btnLogGenerate");
+    if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
+    try {
+      if (!db) initFirebase();
+      const snap = await db.ref("usage_logs").once("value");
+      const raw = snap.val() || {};
+      const fromTs = new Date(from + "T00:00:00").getTime();
+      const toTs = new Date(to + "T23:59:59.999").getTime();
+      const filtered = {};
+      let totalRaw = 0;
+      Object.entries(raw).forEach(([k, v]) => {
+        if (!v) return;
+        totalRaw++;
+        const ts = Number(v.timestamp) || Number(v.createdAt) || 0;
+        if (ts >= fromTs && ts <= toTs) filtered[k] = Object.assign({}, v, { timestamp: ts });
+      });
+      allLogs = filtered;
+      window._logsLoadedOnce = true;
+      pageState.log = 1;
+      renderLogs();
+      if ($("logHint")) $("logHint").textContent = "Showing " + Object.keys(filtered).length + " / " + totalRaw + " logs · " + from + " → " + to;
+    } catch (e) {
+      console.error(e);
+      alert("Logs load fail: " + (e.message || e));
+      if ($("logHint")) $("logHint").textContent = "Error: " + (e.message || e);
+    }
+    if (btn) { btn.disabled = false; btn.textContent = "Generate"; }
+  }
+
+
   const $ = (id) => document.getElementById(id);
   const setText = (id, val) => { const el = $(id); if (el) el.textContent = val; };
   const show = (el, on) => { if (el) el.classList.toggle("hidden", !on); };
@@ -144,12 +189,12 @@
     if (tab === "tokens") renderTokens();
     if (tab === "distributors") renderDists();
     if (tab === "logs") {
-      // No auto download — user must click Generate (saves Firebase bandwidth)
-      if (!window._logsLoadedOnce) {
-        allLogs = allLogs || {};
+      try { initLogDates(); } catch (e) {}
+      if (window._logsLoadedOnce) renderLogs();
+      else {
+        allLogs = {};
         renderLogs();
-      } else {
-        renderLogs();
+        if ($("logHint")) $("logHint").textContent = "Date select karke Generate dabayein (default = aaj).";
       }
     }
     if (tab === "passreq") renderPass();
@@ -643,7 +688,7 @@
   function renderLogs() {
     const q = (($("logSearch") && $("logSearch").value) || "").toLowerCase();
     const sort = ($("logSort") && $("logSort").value) || "new";
-    let list = Object.entries(allLogs || {}).map(([k, v]) => ({ id: k, ...v })).filter((x) => x.timestamp);
+    let list = Object.entries(allLogs || {}).map(([k, v]) => ({ id: k, ...(v || {}), timestamp: Number((v && v.timestamp) || (v && v.createdAt) || 0) })).filter((x) => x.timestamp);
     if (q) list = list.filter((x) => (x.userName || "").toLowerCase().includes(q) || String(x.userMobile || "").includes(q) || String(x.cscUserId || "").includes(q) || String(x.farmerId || "").includes(q));
     list.sort((a, b) => sort === "old" ? (a.timestamp || 0) - (b.timestamp || 0) : (b.timestamp || 0) - (a.timestamp || 0));
     const total = list.length;
@@ -675,6 +720,8 @@
   }
   if ($("logSearch")) $("logSearch").oninput = () => { pageState.log = 1; renderLogs(); };
   if ($("logSort")) $("logSort").onchange = () => { pageState.log = 1; renderLogs(); };
+  if ($("btnLogGenerate")) $("btnLogGenerate").onclick = () => loadLogsByDate();
+  try { initLogDates(); } catch (e) {}
   if ($("btnClearLogs")) $("btnClearLogs").onclick = async () => {
     if (!confirm("Delete ALL usage logs?")) return;
     await fbSet("usage_logs", null);
@@ -1007,6 +1054,7 @@
           }
         } catch (e) {}
         await loadAll();
+        try { initLogDates(); } catch (e) {}
         // No auto-refresh — only Refresh button / page reload (saves RTDB downloads)
         if (window._adminPoll) { clearInterval(window._adminPoll); window._adminPoll = null; }
       } else {
@@ -1082,42 +1130,8 @@
     a.click();
   };
 
-  // --- Logs: date range Generate (only then fetch) ---
-  function todayISO() {
-    const d = new Date();
-    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
-  }
-  function initLogDates() {
-    if ($("logFrom") && !$("logFrom").value) $("logFrom").value = todayISO();
-    if ($("logTo") && !$("logTo").value) $("logTo").value = todayISO();
-  }
-  initLogDates();
-  if ($("btnLogGenerate")) $("btnLogGenerate").onclick = async () => {
-    initLogDates();
-    const from = $("logFrom").value;
-    const to = $("logTo").value;
-    const btn = $("btnLogGenerate");
-    if (btn) { btn.disabled = true; btn.textContent = "Loading…"; }
-    try {
-      // Full logs fetch then filter by date (RTDB has limited range queries without index)
-      const raw = await safeGet("usage_logs") || {};
-      const fromTs = from ? new Date(from + "T00:00:00").getTime() : 0;
-      const toTs = to ? new Date(to + "T23:59:59").getTime() : Date.now();
-      const filtered = {};
-      Object.entries(raw).forEach(([k, v]) => {
-        if (!v || !v.timestamp) return;
-        if (v.timestamp >= fromTs && v.timestamp <= toTs) filtered[k] = v;
-      });
-      allLogs = filtered;
-      window._logsLoadedOnce = true;
-      pageState.log = 1;
-      renderLogs();
-      if ($("logHint")) $("logHint").textContent = "Showing " + Object.keys(filtered).length + " logs from " + from + " to " + to;
-    } catch (e) {
-      alert("Logs load fail: " + (e.message || e));
-    }
-    if (btn) { btn.disabled = false; btn.textContent = "Generate"; }
-  };
+  // logs: loadLogsByDate() defined at top
+
 
   // freeTokensOnTempApprove in settings save/load if fields exist
   // (settings render elsewhere — patch settings object default)

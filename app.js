@@ -6,6 +6,8 @@
   let incomeChart = null;
   const pageState = { ret: 1, tok: 1, log: 1, pass: 1, inact: 1, wallet: 1 };
   const PAGE = { ret: 10, tok: 10, log: 10, pass: 10, inact: 10, wallet: 10 };
+  let _loadAllAt = 0;
+  const LOAD_ALL_MIN_MS = 60000; // don't re-download full trees more than once/min
 
   function todayISO() {
     const d = new Date();
@@ -116,7 +118,7 @@
       refreshTab(btn.dataset.tab);
     };
   });
-  $("btnRefresh").onclick = () => loadAll();
+  $("btnRefresh").onclick = () => loadAll(true);
   if ($("btnMenu")) $("btnMenu").onclick = () => $("app") && $("app").classList.toggle("sidebar-open");
   if ($("btnSideToggle")) {
     $("btnSideToggle").onclick = () => {
@@ -203,8 +205,22 @@
     if (tab === "settings") fillSettings();
   }
 
-  async function loadAll() {
+  async function loadAll(force) {
     try {
+      // Bandwidth guard: skip full re-download if recent (unless force / Refresh)
+      if (!force && _loadAllAt && Date.now() - _loadAllAt < LOAD_ALL_MIN_MS && Object.keys(allUsers || {}).length) {
+        const tab = (document.querySelector(".nav.active") || {}).dataset
+          ? document.querySelector(".nav.active").dataset.tab
+          : "dashboard";
+        if (tab === "dashboard") renderDashboard();
+        else if (tab === "retailers") renderRetailers();
+        else if (tab === "tokens") renderTokens();
+        else if (tab === "logs") renderLogs();
+        else if (tab === "passreq") renderPass();
+        else if (tab === "wallet") renderWallet();
+        else if (tab === "settings") fillSettings();
+        return;
+      }
       const tab = (document.querySelector(".nav.active") || {}).dataset
         ? document.querySelector(".nav.active").dataset.tab
         : "dashboard";
@@ -215,7 +231,17 @@
         safeGet("portal_expenses"), safeGet("admin_income"),
         needLogs ? safeGet("usage_logs") : Promise.resolve(allLogs)
       ]);
+      _loadAllAt = Date.now();
       allUsers = u || {}; allTokenReqs = tq || {}; allDists = d || {};
+      // Maintain tiny pending counter for extension badge (avoids full-tree scans)
+      try {
+        let pc = 0;
+        Object.values(allTokenReqs || {}).forEach((r) => {
+          if (r && (r.status === "pending" || r.status === "temp_approved")) pc++;
+        });
+        Object.values(allUsers || {}).forEach((x) => { if (x && x.status === "pending") pc++; });
+        fbSet("meta/pendingCount", pc).catch(() => {});
+      } catch (e) {}
       allPass = p || {}; settings = s || {};
       allExpenses = e || {}; window._adminIncome = inc || {};
       if (needLogs) allLogs = l || {};
@@ -340,7 +366,7 @@
         const b = e.target.closest("button[data-eid]");
         if (!b || !confirm("Delete?")) return;
         await fbSet("portal_expenses/" + b.dataset.eid, null);
-        await loadAll();
+        await loadAll(true);
       };
     }
     // inactive 10/page
@@ -468,7 +494,7 @@
         status: "active", tokens, freeTokens: (u.freeTokens || 0) + free,
         approvedAt: Date.now(), finalApprovedAt: Date.now(), awaitingFinalApprove: false, tokenHistory: hist
       });
-      await loadAll();
+      await loadAll(true);
       return;
     }
     if (a === "edit") {
@@ -524,7 +550,7 @@
       if (!confirm("Delete retailer permanently?")) return;
       await fbSet("users/" + id, null);
     }
-    await loadAll();
+    await loadAll(true);
   }
 
   ["retSearch", "retStatus", "retTokFilter", "retVersionFilter", "retSort"].forEach((id) => {
@@ -558,7 +584,7 @@
         const hist = Array.isArray(cur.tokenHistory) ? cur.tokenHistory.slice() : [];
         if (n > 0) hist.push({ type: "credit", amount: n, reason: "Free tokens on TEMP approve", timestamp: Date.now(), balanceAfter: n });
         await fbUpdate("users/" + id, { status: "temp_approved", tokens: n, freeTokens: n, tempApprovedAt: Date.now(), awaitingFinalApprove: true, tokenHistory: hist });
-        await loadAll();
+        await loadAll(true);
         return;
       }
       if (b.dataset.a === "ok") {
@@ -569,7 +595,7 @@
         const mob = String(u.mobile || "").replace(/\D/g, "").slice(-10);
         if (mob) window.open("https://wa.me/91" + mob + "?text=" + encodeURIComponent(msg), "_blank");
       } else if (confirm("Delete?")) await fbSet("users/" + id, null);
-      await loadAll();
+      await loadAll(true);
     };
   }
 
@@ -635,7 +661,7 @@
         if (r.status === "temp_approved" || r.status === "approved") await creditUser(r.userId, -(parseInt(r.amount, 10) || 0), "Reject clawback");
         await fbUpdate("token_requests/" + rid, { status: "rejected", rejectedAt: Date.now() });
       }
-      await loadAll();
+      await loadAll(true);
     };
   }
   if ($("tokFilter")) $("tokFilter").onchange = () => { pageState.tok = 1; renderTokens(); };
@@ -688,7 +714,7 @@
       } else if (b.dataset.a === "block") {
         await fbUpdate("distributors/" + id, { status: d.status === "blocked" ? "active" : "blocked" });
       }
-      await loadAll();
+      await loadAll(true);
     };
   }
 
@@ -700,7 +726,7 @@
     const id = "d_" + mobile;
     await fbSet("distributors/" + id, { name, mobile, password, tokens: 0, totalCommission: 0, status: "active", createdAt: Date.now(), tokenHistory: [] });
     alert("Created");
-    await loadAll();
+    await loadAll(true);
   };
 
   function renderLogs() {
@@ -733,7 +759,7 @@
       const b = e.target.closest("button[data-lid]");
       if (!b || !confirm("Delete log?")) return;
       await fbSet("usage_logs/" + b.dataset.lid, null);
-      await loadAll();
+      await loadAll(true);
     };
   }
   if ($("logSearch")) $("logSearch").oninput = () => { pageState.log = 1; renderLogs(); };
@@ -743,7 +769,7 @@
   if ($("btnClearLogs")) $("btnClearLogs").onclick = async () => {
     if (!confirm("Delete ALL usage logs?")) return;
     await fbSet("usage_logs", null);
-    await loadAll();
+    await loadAll(true);
   };
 
   function renderPass() {
@@ -768,7 +794,7 @@
       const b = e.target.closest("button");
       if (!b) return;
       await fbSet("password_requests/" + b.dataset.id, null);
-      await loadAll();
+      await loadAll(true);
     };
   }
 
@@ -808,7 +834,7 @@
         const b = e.target.closest("button[data-eid]");
         if (!b || !confirm("Delete?")) return;
         await fbSet("portal_expenses/" + b.dataset.eid, null);
-        await loadAll();
+        await loadAll(true);
       };
     }
   }
@@ -830,13 +856,13 @@
       distributorId: $("arDist").value || null, tokenCost: rate === "" ? null : parseInt(rate, 10),
       tokenHistory: [], generatedFarmerIds: {}, totalUsed: 0
     });
-    alert("Created"); await loadAll();
+    alert("Created"); await loadAll(true);
   };
   if ($("btnMap")) $("btnMap").onclick = async () => {
     const uid = "u_" + $("mapRetMobile").value.replace(/\D/g, "").slice(0, 10);
     if (!allUsers[uid]) return alert("Not found");
     await fbUpdate("users/" + uid, { distributorId: $("mapDist").value || null });
-    alert("Mapped"); await loadAll();
+    alert("Mapped"); await loadAll(true);
   };
 
   function fillSettings() {
@@ -868,19 +894,19 @@
   }
   if ($("btnSaveAuto")) $("btnSaveAuto").onclick = async () => {
     await fbUpdate("settings", { autoApproveEnabled: $("setAutoPay").value === "1", autoTempApproveRetailer: $("setAutoRet").value === "1", freeTokensOnTempApprove: parseInt(($("setFreeTempTok") && $("setFreeTempTok").value) || "1", 10) || 0, tokenCost: parseInt($("setTokenCost").value, 10) || 0, freeGenerateEnabled: $("setFreeGen").value === "1", inactiveDays: parseInt($("setInactiveDays").value, 10) || 7, pendingSoundEnabled: $("setSound") ? $("setSound").value === "1" : true });
-    alert("Saved"); await loadAll();
+    alert("Saved"); await loadAll(true);
   };
   if ($("btnSaveDistComm")) $("btnSaveDistComm").onclick = async () => {
     await fbUpdate("settings", { distCommissionEvery: parseInt($("setDistEvery").value, 10) || 2, distCommissionGive: parseInt($("setDistGive").value, 10) || 0 });
-    alert("Saved"); await loadAll();
+    alert("Saved"); await loadAll(true);
   };
   if ($("btnSaveSupport")) $("btnSaveSupport").onclick = async () => {
     await fbUpdate("settings", { whatsappNumber: $("setWa").value.trim(), waGroupLink: $("setWaGroup").value.trim(), videoGuideLink: $("setVideo").value.trim(), buyMessage: $("setBuyMsg").value.trim(), approveMessage: $("setApproveMsg").value.trim(), upiLink: $("setUpi").value.trim() });
-    alert("Saved"); await loadAll();
+    alert("Saved"); await loadAll(true);
   };
   if ($("btnSaveRates")) $("btnSaveRates").onclick = async () => {
     await fbUpdate("settings", { rate1to5: parseFloat($("rate1").value) || 20, rate6to10: parseFloat($("rate2").value) || 15, rate11plus: parseFloat($("rate3").value) || 10, razorpayEnabled: $("rzpEn").value === "1", razorpayKeyId: $("rzpKey").value.trim(), manualPaymentEnabled: $("setManualPay") ? $("setManualPay").value === "1" : true, moreServiceEnabled: $("setMoreEn").value === "1", moreServiceUrl: $("setMoreUrl").value.trim() });
-    alert("Saved"); await loadAll();
+    alert("Saved"); await loadAll(true);
   };
 
   // Delete DB / Migrate
@@ -890,7 +916,7 @@
     const paths = ["users", "token_requests", "distributors", "usage_logs", "password_requests", "settings", "portal_expenses", "admin_income", "admins", "services", "service_requests", "service_categories"];
     for (const p of paths) { try { await fbSet(p, null); } catch (e) { console.warn(p, e); } }
     alert("Deleted");
-    await loadAll();
+    await loadAll(true);
   };
   if ($("btnMigrate")) $("btnMigrate").onclick = async () => {
     const url = ($("migUrl").value || "").replace(/\/$/, "");
@@ -913,7 +939,7 @@
     if (!title || !amount) return alert("Title + amount");
     await fbSet("portal_expenses/exp_" + Date.now(), { title, amount, date, createdAt: Date.now() });
     $("expTitle").value = ""; $("expAmount").value = "";
-    await loadAll();
+    await loadAll(true);
   };
 
   function exportCsv(name, rows) {
@@ -982,7 +1008,7 @@
       }
     }
     alert("Restore done. OK: " + ok + " · Fail: " + fail + (fail ? " (Rules/Auth check)" : ""));
-    await loadAll();
+    await loadAll(true);
   };
 
   function showStatement(id, u) {
@@ -1005,7 +1031,7 @@
       distributorId: $("edDist").value.trim() || null, status: $("edStatus").value, walletRefillDisabled: $("edRefillOff").checked
     });
     $("modalEdit").classList.add("hidden");
-    await loadAll();
+    await loadAll(true);
   };
   if ($("btnCloseTokEdit")) $("btnCloseTokEdit").onclick = () => $("modalTokEdit").classList.add("hidden");
   if ($("btnSaveTokEdit")) $("btnSaveTokEdit").onclick = async () => {
@@ -1017,7 +1043,7 @@
       status: $("teStatus").value
     });
     $("modalTokEdit").classList.add("hidden");
-    await loadAll();
+    await loadAll(true);
   };
 
   document.addEventListener("click", (e) => {
@@ -1056,7 +1082,7 @@
       try { await fbUpdate("users/" + id, patch); } catch (e) { console.warn(id, e); }
     }
     alert("Done: " + ids.length);
-    await loadAll();
+    await loadAll(true);
   }
   if ($("btnBulkAutoOn")) $("btnBulkAutoOn").onclick = () => bulkUpdate({ autoApprovePayments: true }, "Auto Pay ON");
   if ($("btnBulkAutoOff")) $("btnBulkAutoOff").onclick = () => bulkUpdate({ autoApprovePayments: false }, "Auto Pay OFF");
@@ -1082,7 +1108,7 @@
       } catch (e) { console.warn(id, e); }
     }
     alert("Final approve done");
-    await loadAll();
+    await loadAll(true);
   };
 
   try {
@@ -1101,7 +1127,7 @@
             const st = $("dbStatus"); if (st) st.className = "badge err";
           }
         } catch (e) {}
-        await loadAll();
+        await loadAll(true);
         try { initLogDates(); } catch (e) {}
         // No auto-refresh — only Refresh button / page reload (saves RTDB downloads)
         if (window._adminPoll) { clearInterval(window._adminPoll); window._adminPoll = null; }
@@ -1127,7 +1153,7 @@
       try { await fbSet("users/" + id, null); } catch (e) {}
     }
     alert("Deleted " + ids.length);
-    await loadAll();
+    await loadAll(true);
   };
 
   // --- Retailer CSV template + import ---
@@ -1164,7 +1190,7 @@
     }
     alert("Imported: " + ok + " | Skipped: " + fail);
     ev.target.value = "";
-    await loadAll();
+    await loadAll(true);
   };
   if ($("btnExportDb")) $("btnExportDb").onclick = async () => {
     const data = { _exportedAt: Date.now() };
